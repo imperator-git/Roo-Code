@@ -73,6 +73,7 @@ import {
 	Vertex,
 	VSCodeLM,
 	XAI,
+	WebUiGemini,
 } from "./providers"
 
 import { MODELS_BY_PROVIDER, PROVIDERS } from "./constants"
@@ -373,6 +374,10 @@ const ApiOptions = ({
 			</div>
 
 			{errorMessage && <ApiErrorMessage errorMessage={errorMessage} />}
+
+			{selectedProvider === "web-ui-gemini" && (
+				<WebUiGemini apiConfiguration={apiConfiguration} setApiConfigurationField={setApiConfigurationField} />
+			)}
 
 			{selectedProvider === "openrouter" && (
 				<OpenRouter
