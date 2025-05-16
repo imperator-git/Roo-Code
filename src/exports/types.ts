@@ -30,6 +30,7 @@ type GlobalSettings = {
 							| "groq"
 							| "chutes"
 							| "litellm"
+							| "web-ui-gemini"
 					  )
 					| undefined
 		  }[]
@@ -197,6 +198,7 @@ type ProviderSettings = {
 				| "groq"
 				| "chutes"
 				| "litellm"
+				| "web-ui-gemini"
 		  )
 		| undefined
 	includeMaxTokens?: boolean | undefined
@@ -308,6 +310,9 @@ type ProviderSettings = {
 	litellmBaseUrl?: string | undefined
 	litellmApiKey?: string | undefined
 	litellmModelId?: string | undefined
+	webUiGeminiDiscoveryPort?: number | undefined
+	webUiGeminiPuppeteerTimeout?: number | undefined
+	webUiGeminiBaseUrl?: string | undefined
 }
 
 export type { ProviderSettings }
@@ -338,6 +343,7 @@ type ProviderSettingsEntry = {
 				| "groq"
 				| "chutes"
 				| "litellm"
+				| "web-ui-gemini"
 		  )
 		| undefined
 }

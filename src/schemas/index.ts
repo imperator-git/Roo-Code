@@ -32,6 +32,7 @@ export const providerNames = [
 	"groq",
 	"chutes",
 	"litellm",
+	"web-ui-gemini",
 ] as const
 
 export const providerNamesSchema = z.enum(providerNames)
@@ -491,6 +492,12 @@ const litellmSchema = baseProviderSettingsSchema.extend({
 	litellmModelId: z.string().optional(),
 })
 
+const webUiGeminiSchema = baseProviderSettingsSchema.extend({
+	webUiGeminiDiscoveryPort: z.coerce.number().int("Discovery port must be an integer.").optional(),
+	webUiGeminiPuppeteerTimeout: z.coerce.number().int("Timeout must be a positive number.").optional(),
+	webUiGeminiBaseUrl: z.string().optional(),
+})
+
 const defaultSchema = z.object({
 	apiProvider: z.undefined(),
 })
@@ -517,6 +524,7 @@ export const providerSettingsSchemaDiscriminated = z.discriminatedUnion("apiProv
 	groqSchema.merge(z.object({ apiProvider: z.literal("groq") })),
 	chutesSchema.merge(z.object({ apiProvider: z.literal("chutes") })),
 	litellmSchema.merge(z.object({ apiProvider: z.literal("litellm") })),
+	webUiGeminiSchema.merge(z.object({ apiProvider: z.literal("web-ui-gemini") })),
 	defaultSchema,
 ])
 
@@ -545,6 +553,7 @@ export const providerSettingsSchema = z
 	.merge(groqSchema)
 	.merge(chutesSchema)
 	.merge(litellmSchema)
+	.merge(webUiGeminiSchema)
 
 export type ProviderSettings = z.infer<typeof providerSettingsSchema>
 
@@ -643,6 +652,11 @@ const providerSettingsRecord: ProviderSettingsRecord = {
 	litellmBaseUrl: undefined,
 	litellmApiKey: undefined,
 	litellmModelId: undefined,
+	// WebUiGemini
+
+	webUiGeminiDiscoveryPort: undefined,
+	webUiGeminiPuppeteerTimeout: undefined,
+	webUiGeminiBaseUrl: undefined,
 }
 
 export const PROVIDER_SETTINGS_KEYS = Object.keys(providerSettingsRecord) as Keys<ProviderSettings>[]
