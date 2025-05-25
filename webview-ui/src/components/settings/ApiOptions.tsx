@@ -74,6 +74,7 @@ import {
 	VSCodeLM,
 	XAI,
 	WebUiGemini,
+	WebUiStudio,
 } from "./providers"
 
 import { MODELS_BY_PROVIDER, PROVIDERS } from "./constants"
@@ -379,6 +380,9 @@ const ApiOptions = ({
 				<WebUiGemini apiConfiguration={apiConfiguration} setApiConfigurationField={setApiConfigurationField} />
 			)}
 
+			{selectedProvider === "web-ui-studio" && (
+				<WebUiStudio apiConfiguration={apiConfiguration} setApiConfigurationField={setApiConfigurationField} />
+			)}
 			{selectedProvider === "openrouter" && (
 				<OpenRouter
 					apiConfiguration={apiConfiguration}

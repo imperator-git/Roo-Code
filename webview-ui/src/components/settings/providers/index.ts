@@ -21,3 +21,5 @@ export { VSCodeLM } from "./VSCodeLM"
 export { XAI } from "./XAI"
 export { LiteLLM } from "./LiteLLM"
 export { WebUiGemini } from "./WebUiGemini"
+
+export * from "./WebUiStudio"

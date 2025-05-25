@@ -259,8 +259,14 @@ export class WebUiGeminiHandler implements ApiHandler {
 			const sendButton = await page.waitForSelector(CLICKABLE_SEND_BUTTON_SELECTOR, { visible: true })
 			await sendButton!.click()
 
-			await page.waitForSelector(PROCESSING_STOP_BUTTON_SELECTOR, { visible: true })
-			await page.waitForSelector(PROCESSING_STOP_BUTTON_SELECTOR, { hidden: true })
+			await page.waitForSelector(PROCESSING_STOP_BUTTON_SELECTOR, {
+				visible: true,
+				timeout: this.puppeteerTimeout,
+			})
+			await page.waitForSelector(PROCESSING_STOP_BUTTON_SELECTOR, {
+				hidden: true,
+				timeout: this.puppeteerTimeout,
+			})
 			await page
 				.waitForSelector(READY_FOR_INPUT_SEND_BUTTON_SELECTOR, { visible: true })
 				.catch(() =>
