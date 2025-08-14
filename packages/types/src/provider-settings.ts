@@ -47,6 +47,8 @@ export const providerNames = [
 	"zai",
 	"fireworks",
 	"io-intelligence",
+	"web-ui-studio",
+	"web-ui-gemini",
 ] as const
 
 export const providerNamesSchema = z.enum(providerNames)
@@ -288,6 +290,24 @@ const ioIntelligenceSchema = apiModelIdProviderModelSchema.extend({
 	ioIntelligenceApiKey: z.string().optional(),
 })
 
+const webUiStudioSchema = baseProviderSettingsSchema.extend({
+	webUiStudioModelId: z.string().optional(),
+	webUiStudioBaseUrl: z.string().optional(),
+	webUiStudioDiscoveryPort: z.number().optional(),
+	webUiStudioPuppeteerTimeout: z.number().optional(),
+	webUiStudioRegenerationPrompt: z.string().optional(),
+	webUiStudioMalformedTokenList: z.string().optional(),
+})
+
+const webUiGeminiSchema = apiModelIdProviderModelSchema.extend({
+	webUiGeminiApiKey: z.string().optional(),
+	webUiGeminiBaseUrl: z.string().optional(),
+	webUiGeminiDiscoveryPort: z.number().optional(),
+	webUiGeminiPuppeteerTimeout: z.number().optional(),
+	webUiGeminiRegenerationPrompt: z.string().optional(),
+	webUiGeminiMalformedTokenList: z.string().optional(),
+})
+
 const defaultSchema = z.object({
 	apiProvider: z.undefined(),
 })
@@ -324,6 +344,8 @@ export const providerSettingsSchemaDiscriminated = z.discriminatedUnion("apiProv
 	zaiSchema.merge(z.object({ apiProvider: z.literal("zai") })),
 	fireworksSchema.merge(z.object({ apiProvider: z.literal("fireworks") })),
 	ioIntelligenceSchema.merge(z.object({ apiProvider: z.literal("io-intelligence") })),
+	webUiStudioSchema.merge(z.object({ apiProvider: z.literal("web-ui-studio") })),
+	webUiGeminiSchema.merge(z.object({ apiProvider: z.literal("web-ui-gemini") })),
 	defaultSchema,
 ])
 
@@ -360,6 +382,8 @@ export const providerSettingsSchema = z.object({
 	...zaiSchema.shape,
 	...fireworksSchema.shape,
 	...ioIntelligenceSchema.shape,
+	...webUiStudioSchema.shape,
+	...webUiGeminiSchema.shape,
 	...codebaseIndexProviderSchema.shape,
 })
 
@@ -386,6 +410,8 @@ export const MODEL_ID_KEYS: Partial<keyof ProviderSettings>[] = [
 	"litellmModelId",
 	"huggingFaceModelId",
 	"ioIntelligenceModelId",
+	"webUiStudioModelId",
+	"webUiGeminiApiKey", // Assuming webUiGemini uses apiModelId, but if it has its own, add it here.
 ]
 
 export const getModelId = (settings: ProviderSettings): string | undefined => {

@@ -36,6 +36,8 @@ import {
 	DoubaoHandler,
 	ZAiHandler,
 	FireworksHandler,
+	WebUiGeminiHandler,
+	WebUiStudioHandler,
 } from "./providers"
 
 export interface SingleCompletionHandler {
@@ -140,6 +142,10 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new FireworksHandler(options)
 		case "io-intelligence":
 			return new IOIntelligenceHandler(options)
+		case "web-ui-gemini":
+			return new WebUiGeminiHandler(options)
+		case "web-ui-studio":
+			return new WebUiStudioHandler(options)
 		default:
 			apiProvider satisfies "gemini-cli" | undefined
 			return new AnthropicHandler(options)

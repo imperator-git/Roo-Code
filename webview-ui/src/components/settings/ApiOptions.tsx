@@ -86,6 +86,8 @@ import {
 	XAI,
 	ZAi,
 	Fireworks,
+	WebUiGemini,
+	WebUiStudio,
 } from "./providers"
 
 import { MODELS_BY_PROVIDER, PROVIDERS } from "./constants"
@@ -399,6 +401,13 @@ const ApiOptions = ({
 			</div>
 
 			{errorMessage && <ApiErrorMessage errorMessage={errorMessage} />}
+
+			{selectedProvider === "web-ui-gemini" && (
+				<WebUiGemini apiConfiguration={apiConfiguration} setApiConfigurationField={setApiConfigurationField} />
+			)}
+			{selectedProvider === "web-ui-studio" && (
+				<WebUiStudio apiConfiguration={apiConfiguration} setApiConfigurationField={setApiConfigurationField} />
+			)}
 
 			{selectedProvider === "openrouter" && (
 				<OpenRouter
