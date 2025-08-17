@@ -471,7 +471,7 @@ export class WebUiStudioHandler implements ApiHandler {
 
 				// --- START OF NEW, ROBUST BLOCK ---
 				// Wait for the button to be visible in the DOM
-				await page.waitForSelector(COPY_MARKDOWN_BUTTON_SELECTOR, { visible: true, timeout: 5000 })
+				await page.waitForSelector(COPY_MARKDOWN_BUTTON_SELECTOR, { visible: true, timeout: 10000 })
 				logger.debug(`[WebUiStudioHandler:${this.modelName}] "Copy markdown" button is visible.`)
 
 				// Use page.evaluate to perform a more reliable, native click.
