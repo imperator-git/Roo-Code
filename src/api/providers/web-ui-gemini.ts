@@ -39,11 +39,20 @@ This is the end of the response.
 Remember: Going forward all of the content above must be inside a single \`\`\` block.
 `
 
-const DEFAULT_MALFORMED_TOKEN_LIST = "\\nREPLACE\\n"
+const DEFAULT_MALFORMED_TOKEN_LIST = "\\>\\>\\>\\>\\>\\>\\>"
 
-// UI Selectors
+// UI Selectors (copied from old version)
 const PROMPT_TEXTAREA_SELECTOR = 'div.ql-editor[aria-label="Enter a prompt here"]'
 const CLICKABLE_SEND_BUTTON_SELECTOR = 'button[aria-label="Send message"][aria-disabled="false"].submit'
+const MODEL_RESPONSE_ROOT_SELECTOR = "model-response"
+
+// Custom error for regeneration
+class RegenerationError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = "RegenerationError"
+	}
+}
 
 export class WebUiGeminiHandler implements ApiHandler {
 	public readonly modelName: string
@@ -69,7 +78,7 @@ export class WebUiGeminiHandler implements ApiHandler {
 		this.malformedTokenList = ((options.webUiGeminiMalformedTokenList || DEFAULT_MALFORMED_TOKEN_LIST) as string)
 			.replace(/\\n/g, "\n")
 			.split(",")
-			.map((s) => s)
+			.map((s) => s.trim()) // trim is important here
 			.filter((s) => s !== "")
 		this.modelName = (options as any).model || (options as any).apiModelId || DEFAULT_MODEL_DISPLAY_NAME
 	}
@@ -165,7 +174,7 @@ export class WebUiGeminiHandler implements ApiHandler {
 		const latestMessage = messages[messages.length - 1]
 		if (!latestMessage) throw new Error("No message to relay")
 
-		const currentPrompt =
+		let currentPrompt =
 			messages.length === 1
 				? `${systemPrompt}\n\n${getMessageContent(latestMessage)}`
 				: getMessageContent(latestMessage)
@@ -198,101 +207,160 @@ export class WebUiGeminiHandler implements ApiHandler {
 					}
 				} catch {}
 			}
-			return longestContent
+			// Add decoding logic here
+			return longestContent ? xmlUnescapeConditional(longestContent) : null
 		}
 
-		const responsePromise = new Promise<string>(async (resolve, reject) => {
-			let settled = false
-			const cleanup = () => {
-				cdp.off("Fetch.requestPaused", onPaused)
-				try {
-					cdp.send("Fetch.disable")
-				} catch {}
-				clearTimeout(timeout)
-			}
+		let attemptCount = 0
+		const MAX_RETRY_ATTEMPTS = 3
+		let finalResponse = ""
 
-			const onPaused = async (event: any) => {
-				const { requestId, request } = event
-				console.error(`[WebUiGeminiHandler:${this.modelName}] Request intercepted: ${request.url}`)
-				if (request.url.includes("StreamGenerate")) {
+		while (attemptCount < MAX_RETRY_ATTEMPTS) {
+			attemptCount++
+			let responseTextRaw = ""
+
+			const responsePromise = new Promise<string>(async (resolve, reject) => {
+				let settled = false
+				const cleanup = () => {
+					cdp.off("Fetch.requestPaused", onPaused)
 					try {
-						const bodyData = await cdp.send("Fetch.getResponseBody", { requestId })
-						console.error(
-							`[WebUiGeminiHandler:${this.modelName}] !!! 1.Received response: ${bodyData.body}`,
-						)
-						const bodyText = bodyData.base64Encoded
-							? Buffer.from(bodyData.body, "base64").toString("utf8")
-							: bodyData.body
-						const md = parseFinalResponse(bodyText)
-						console.error(`[WebUiGeminiHandler:${this.modelName}] !!! 2.Received response: ${md}`)
-						if (md && !settled) {
-							settled = true
-							cleanup()
-							resolve(md)
+						cdp.send("Fetch.disable")
+					} catch {}
+					clearTimeout(timeout)
+				}
+
+				const onPaused = async (event: any) => {
+					const { requestId, request } = event
+					logger.info(`[WebUiGeminiHandler:${this.modelName}] Request intercepted: ${request.url}`)
+					if (request.url.includes("StreamGenerate")) {
+						try {
+							const bodyData = await cdp.send("Fetch.getResponseBody", { requestId })
+							logger.info(
+								`[WebUiGeminiHandler:${this.modelName}] 1.Received response - rawdata: ${bodyData.body}`,
+							)
+							const bodyText = bodyData.base64Encoded
+								? Buffer.from(bodyData.body, "base64").toString("utf8")
+								: bodyData.body
+							const md = parseFinalResponse(bodyText)
+							logger.info(`[WebUiGeminiHandler:${this.modelName}] 2.Received response - parsed: ${md}`)
+
+							if (md) {
+								if (this.malformedTokenList.some((token) => md.includes(token))) {
+									logger.info(
+										`[WebUiGeminiHandler:${this.modelName}] Response contains regeneration trigger: ${this.malformedTokenList}. Triggering regeneration.`,
+									)
+									settled = true
+									cleanup()
+									reject(new RegenerationError("Malformed token found, triggering regeneration."))
+								} else if (!settled) {
+									settled = true
+									cleanup()
+									resolve(md)
+								}
+							}
+						} catch (e: any) {
+							if (!settled) {
+								settled = true
+								cleanup()
+								reject(e)
+							}
+						} finally {
+							if (!page.isClosed()) {
+								try {
+									await cdp.send("Fetch.continueRequest", { requestId })
+								} catch {}
+							}
 						}
-					} catch {
-					} finally {
+					} else {
 						if (!page.isClosed()) {
 							try {
 								await cdp.send("Fetch.continueRequest", { requestId })
 							} catch {}
 						}
 					}
-				} else {
-					if (!page.isClosed()) {
-						try {
-							await cdp.send("Fetch.continueRequest", { requestId })
-						} catch {}
-					}
 				}
-			}
+
+				try {
+					await cdp.send("Fetch.enable", {
+						patterns: [{ urlPattern: "*BardFrontendService/StreamGenerate*", requestStage: "Response" }],
+					})
+					cdp.on("Fetch.requestPaused", onPaused)
+				} catch (e: any) {
+					return reject(new Error(`Fetch.enable failed: ${e.message}`))
+				}
+
+				const timeout = setTimeout(() => {
+					if (!settled) {
+						settled = true
+						cleanup()
+						reject(new Error(`Timeout waiting for Gemini response (waited ${this.puppeteerTimeout} ms).`))
+					}
+				}, this.puppeteerTimeout)
+			})
 
 			try {
-				await cdp.send("Fetch.enable", {
-					patterns: [{ urlPattern: "*BardFrontendService/StreamGenerate*", requestStage: "Response" }],
-				})
-				cdp.on("Fetch.requestPaused", onPaused)
-			} catch (e: any) {
-				return reject(new Error(`Fetch.enable failed: ${e.message}`))
+				// Add the temporary red marker
+				await page.waitForSelector(PROMPT_TEXTAREA_SELECTOR, { visible: true })
+				await page.evaluate((sel) => {
+					const element = document.querySelector(sel) as HTMLElement
+					if (element) {
+						element.style.backgroundColor = "red"
+					}
+				}, PROMPT_TEXTAREA_SELECTOR)
+
+				await page.evaluate(
+					(selector, text) => {
+						const editor = document.querySelector(selector) as HTMLElement
+						if (!editor) throw new Error(`Selector '${selector}' not found for prompt input.`)
+						editor.focus()
+						const sel = window.getSelection()
+						if (sel) {
+							const range = document.createRange()
+							range.selectNodeContents(editor)
+							sel.removeAllRanges()
+							sel.addRange(range)
+							if (sel.toString().length > 0) document.execCommand("delete", false, undefined)
+						}
+						document.execCommand("insertText", false, text)
+					},
+					PROMPT_TEXTAREA_SELECTOR,
+					currentPrompt,
+				)
+
+				const sendButton = await page.waitForSelector(CLICKABLE_SEND_BUTTON_SELECTOR, { visible: true })
+				await sendButton!.click()
+				logger.info(`[WebUiGeminiHandler:${this.modelName}] Prompt sent. Waiting for network capture...`)
+
+				// Wait for the response promise to settle
+				responseTextRaw = await responsePromise
+				finalResponse = responseTextRaw
+				break // Break the while loop if successful
+			} catch (error: any) {
+				if (error instanceof RegenerationError) {
+					// This is a controlled regeneration flow
+					currentPrompt = this.regenerationPrompt
+					// Loop will continue to the next attempt
+				} else {
+					logger.error(`[WebUiGeminiHandler:${this.modelName}] Unhandled error`, { details: error.message })
+					throw error
+				}
+			} finally {
+				// Always remove the red marker, regardless of success or failure
+				await page.evaluate((sel) => {
+					const element = document.querySelector(sel) as HTMLElement
+					if (element) {
+						element.style.backgroundColor = ""
+					}
+				}, PROMPT_TEXTAREA_SELECTOR)
 			}
+		}
 
-			const timeout = setTimeout(() => {
-				if (!settled) {
-					settled = true
-					cleanup()
-					reject(new Error(`Timeout waiting for Gemini response (waited ${this.puppeteerTimeout} ms).`))
-				}
-			}, this.puppeteerTimeout)
-		})
-
-		await page.waitForSelector(PROMPT_TEXTAREA_SELECTOR, { visible: true })
-		await page.evaluate(
-			(selector, text) => {
-				const editor = document.querySelector(selector) as HTMLElement
-				if (!editor) throw new Error(`Selector '${selector}' not found for prompt input.`)
-				editor.focus()
-				const sel = window.getSelection()
-				if (sel) {
-					const range = document.createRange()
-					range.selectNodeContents(editor)
-					sel.removeAllRanges()
-					sel.addRange(range)
-					if (sel.toString().length > 0) document.execCommand("delete", false, undefined)
-				}
-				document.execCommand("insertText", false, text)
-			},
-			PROMPT_TEXTAREA_SELECTOR,
-			currentPrompt,
-		)
-
-		const sendButton = await page.waitForSelector(CLICKABLE_SEND_BUTTON_SELECTOR, { visible: true })
-		await sendButton!.click()
-		logger.info(`[WebUiGeminiHandler:${this.modelName}] Prompt sent. Waiting for network capture...`)
-
-		const responseTextRaw = await responsePromise
-
-		yield { type: "text", text: responseTextRaw }
-		yield { type: "usage", inputTokens: 0, outputTokens: 0 }
+		if (finalResponse) {
+			yield { type: "text", text: finalResponse }
+			yield { type: "usage", inputTokens: 0, outputTokens: 0 }
+		} else {
+			throw new Error("Failed to get a valid response after multiple attempts.")
+		}
 	}
 
 	getModel(): { id: string; info: ModelInfo } {
@@ -342,4 +410,22 @@ function getMessageContent(message: Anthropic.Messages.MessageParam): string {
 			.join("\n")
 	}
 	return ""
+}
+
+function xmlUnescapeConditional(str: string): string {
+	// Count number of escaped entities occurrences
+	const matches = str.match(/&(lt|gt|amp|quot|apos);/g)
+
+	// Only unescape if at least two matches found
+	if (matches && matches.length >= 2) {
+		return str
+			.replace(/&lt;/g, "<")
+			.replace(/&gt;/g, ">")
+			.replace(/&amp;/g, "&")
+			.replace(/&quot;/g, '"')
+			.replace(/&apos;/g, "'")
+	}
+
+	// Otherwise return original string unmodified
+	return str
 }
