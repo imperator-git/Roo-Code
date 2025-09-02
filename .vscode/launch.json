@@ -15,7 +15,7 @@
 			"outFiles": ["${workspaceFolder}/src/dist/**/*.js"],
 			"preLaunchTask": "${defaultBuildTask}",
 			"env": {
-				"NODE_ENV": "development",
+				"NODE_ENV": "test",
 				"VSCODE_DEBUG_MODE": "true"
 			},
 			"resolveSourceMapLocations": ["${workspaceFolder}/**", "!**/node_modules/**"],

@@ -1,6 +1,6 @@
 // File: Roo-Copy/src/api/providers/web-ui-studio.ts
 
-import puppeteer, { Page, Browser, ConnectOptions } from "puppeteer-core"
+import puppeteer, { Page, Browser, ConnectOptions, CDPSession } from "puppeteer-core"
 
 import { discoverChromeHostUrl } from "../../services/browser/browserDiscovery"
 import { logger } from "../../utils/logging"
@@ -18,6 +18,7 @@ const DEFAULT_PUPPETEER_TIMEOUT = 60000
 const DEFAULT_MODEL_DISPLAY_NAME = "studio-via-browser"
 
 const DEFAULT_REGENERATION_PROMPT = "PLACEHOLDER"
+const DEFAULT_ZERO_STATE_PROMPT = "What is today's date?"
 
 const DEFAULT_MALFORMED_TOKEN_LIST = "PLACEHOLDER"
 
@@ -28,18 +29,14 @@ const CLICKABLE_SEND_BUTTON_SELECTOR = `${SUBMIT_BUTTON_BASE_SELECTOR}:not([disa
 const PROCESSING_STOPPABLE_BUTTON_SELECTOR = `${SUBMIT_BUTTON_BASE_SELECTOR}.stoppable` // Button when busy, shows "Stop"
 const DISABLED_RUN_BUTTON_SELECTOR = `${SUBMIT_BUTTON_BASE_SELECTOR}[aria-disabled="true"]`
 // Ready for new input is when PROCESSING_STOPPABLE_BUTTON_SELECTOR is not present, and SUBMIT_BUTTON_BASE_SELECTOR is not disabled.
-const MODEL_RESPONSE_ROOT_SELECTOR = "div.chat-turn-container.model" // Targets the div that has the .model class
-const RESPONSE_MARKDOWN_SELECTOR = "ms-cmark-node" // Note: We keep this for reference but the new method doesn't use it.
-// --- NEW SELECTORS ---
-const MORE_OPTIONS_BUTTON_SELECTOR = 'ms-chat-turn-options button[aria-label="Open options"]'
-const COPY_MARKDOWN_BUTTON_SELECTOR = "button.mat-mdc-menu-item:has(span.copy-markdown-button)"
-// --- END NEW SELECTORS ---
+// Network interception replaces UI automation for response retrieval
 
 export class WebUiStudioHandler implements ApiHandler {
 	public readonly modelName: string
 
 	private _browser: Browser | null = null
 	private _page: Page | null = null
+	private _cdpSession: CDPSession | null = null
 	private _isInitialized = false
 	private _initializationPromise: Promise<void> | null = null
 
@@ -47,6 +44,7 @@ export class WebUiStudioHandler implements ApiHandler {
 	private readonly discoveryPort: number
 	private readonly puppeteerTimeout: number
 	private readonly regenerationPrompt: string
+	private readonly zeroStatePrompt: string
 	private readonly malformedTokenList: string[]
 
 	private readonly options: ApiHandlerOptions
@@ -58,6 +56,7 @@ export class WebUiStudioHandler implements ApiHandler {
 		this.discoveryPort = options.webUiStudioDiscoveryPort || DEFAULT_DISCOVERY_PORT
 		this.puppeteerTimeout = options.webUiStudioPuppeteerTimeout || DEFAULT_PUPPETEER_TIMEOUT
 		this.regenerationPrompt = options.webUiStudioRegenerationPrompt || DEFAULT_REGENERATION_PROMPT
+		this.zeroStatePrompt = (options as any).webUiStudioZeroStatePrompt || DEFAULT_ZERO_STATE_PROMPT
 		this.malformedTokenList = ((options.webUiStudioMalformedTokenList || DEFAULT_MALFORMED_TOKEN_LIST) as string)
 			.replace(/\\n/g, "\n") // Unescape \\n to \n
 			.split(",")
@@ -73,6 +72,7 @@ export class WebUiStudioHandler implements ApiHandler {
 				discoveryPort: this.discoveryPort,
 				puppeteerTimeout: this.puppeteerTimeout,
 				regenerationPrompt: this.regenerationPrompt.substring(0, 50) + "...",
+				zeroStatePrompt: this.zeroStatePrompt,
 				malformedTokenList: this.malformedTokenList,
 				temperature: options.modelTemperature,
 			})}`,
@@ -132,13 +132,6 @@ export class WebUiStudioHandler implements ApiHandler {
 			this._browser = await puppeteer.connect(connectOptions)
 			logger.info(`[WebUiStudioHandler:${this.modelName}] Connected to browser: ${await this._browser.version()}`)
 
-			// --- ADDED FOR CLIPBOARD ACCESS ---
-			// Grant clipboard permissions to the browser context
-			const context = this._browser.defaultBrowserContext()
-			await context.overridePermissions(this.puppeteerBaseUrl, ["clipboard-read", "clipboard-write"])
-			logger.info(`[WebUiStudioHandler:${this.modelName}] Granted clipboard permissions.`)
-			// --- END OF ADDED BLOCK ---
-
 			this._browser.on("disconnected", () => {
 				logger.warn(`[WebUiStudioHandler:${this.modelName}] Browser disconnected.`)
 				this._isInitialized = false
@@ -153,6 +146,9 @@ export class WebUiStudioHandler implements ApiHandler {
 
 			this._page.setDefaultNavigationTimeout(this.puppeteerTimeout)
 			this._page.setDefaultTimeout(this.puppeteerTimeout)
+
+			this._cdpSession = await this._page.target().createCDPSession()
+			await this._cdpSession.send("Network.setBypassServiceWorker", { bypass: true })
 
 			if (!this._page.url().startsWith(this.puppeteerBaseUrl)) {
 				logger.info(`[WebUiStudioHandler:${this.modelName}] Navigating to ${this.puppeteerBaseUrl}`)
@@ -210,7 +206,7 @@ export class WebUiStudioHandler implements ApiHandler {
 						}
 					},
 					ZERO_STATE_TEXTAREA_SELECTOR,
-					this.regenerationPrompt,
+					this.zeroStatePrompt,
 				)
 
 				// Wait for the zero-state run button to become enabled and click it
@@ -236,9 +232,9 @@ export class WebUiStudioHandler implements ApiHandler {
 				)
 				logger.info(`[WebUiStudioHandler:${this.modelName}] Zero-state UI likely transitioned.`)
 				logger.info(
-					`[WebUiStudioHandler:${this.modelName}] Waiting 10 seconds for main UI to stabilize after zero-state transition...`,
+					`[WebUiStudioHandler:${this.modelName}] Waiting 5 seconds for main UI to stabilize after zero-state transition...`,
 				)
-				await new Promise((resolve) => setTimeout(resolve, 10000))
+				await new Promise((resolve) => setTimeout(resolve, 5000))
 			} catch (e) {
 				logger.info(
 					`[WebUiStudioHandler:${this.modelName}] Zero-state UI not detected or failed to interact with it, proceeding to check for main UI. Error: ${(e as Error).message}`,
@@ -266,10 +262,22 @@ export class WebUiStudioHandler implements ApiHandler {
 	private async _cleanupPuppeteerResources(silent = false): Promise<void> {
 		if (!silent) logger.info(`[WebUiStudioHandler:${this.modelName}] Cleaning Puppeteer resources...`)
 		this._isInitialized = false
+		if (this._cdpSession) {
+			try {
+				await this._cdpSession.detach()
+			} catch (e: any) {
+				if (!silent)
+					logger.error(`[WebUiStudioHandler:${this.modelName}] Error detaching CDP session`, {
+						details: e?.message,
+						stack: e?.stack,
+					})
+			}
+		}
 		// Don't close the page here if we didn't open it, just detach from it.
 		// If we created the page (_browser.newPage()), then it could be closed.
 		// For now, let's assume we might be attaching to an existing page.
 		this._page = null // Nullify to indicate it's no longer managed by this instance
+		this._cdpSession = null
 
 		if (this._browser && this._browser.isConnected()) {
 			try {
@@ -290,13 +298,13 @@ export class WebUiStudioHandler implements ApiHandler {
 
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
 		await this._ensureInitialized()
-		if (!this._page || this._page.isClosed()) {
-			throw new Error("WebUiStudioHandler: Page is not available for API call.")
+		if (!this._page || this._page.isClosed() || !this._cdpSession) {
+			throw new Error("WebUiStudioHandler: Page or CDP session not available for API call.")
 		}
 		const page = this._page
+		const cdp = this._cdpSession
 
 		const latestMessage = messages[messages.length - 1]
-
 		if (!latestMessage) {
 			throw new Error("No message to relay")
 		}
@@ -309,10 +317,8 @@ export class WebUiStudioHandler implements ApiHandler {
 		}
 		currentPrompt = currentPrompt.trim()
 
-		let responseTextRaw = ""
-		let decodedResponseText = "" // Declare here
 		let attemptCount = 0
-		const MAX_RETRY_ATTEMPTS = 3 // Prevent infinite loops
+		const MAX_RETRY_ATTEMPTS = 3
 
 		while (attemptCount < MAX_RETRY_ATTEMPTS) {
 			attemptCount++
@@ -321,7 +327,212 @@ export class WebUiStudioHandler implements ApiHandler {
 			)
 			logger.debug(`[WebUiStudioHandler:${this.modelName}] Prompt: "${currentPrompt.substring(0, 100)}..."`)
 
+			// Set up network interception - try Gemini's approach
+			await cdp.send("Fetch.enable", {
+				patterns: [{ urlPattern: "*GenerateContent*", requestStage: "Response" }],
+			})
+
+			let interceptionComplete = false
+			let accumulatedContent = ""
+			let regenerationNeeded = false
+
+			const onPaused = async (event: any) => {
+				const { requestId, request } = event
+				logger.debug(`[WebUiStudioHandler:${this.modelName}] ===== REQUEST INTERCEPTED =====`)
+				logger.debug(`[WebUiStudioHandler:${this.modelName}] URL: ${request.url}`)
+				logger.debug(`[WebUiStudioHandler:${this.modelName}] Method: ${request.method}`)
+				logger.debug(`[WebUiStudioHandler:${this.modelName}] Request ID: ${requestId}`)
+				logger.debug(
+					`[WebUiStudioHandler:${this.modelName}] Event properties: ${Object.keys(event).join(", ")}`,
+				)
+				logger.debug(`[WebUiStudioHandler:${this.modelName}] Response status: ${event.responseStatusCode}`)
+				logger.debug(
+					`[WebUiStudioHandler:${this.modelName}] Response headers count: ${event.responseHeaders?.length || 0}`,
+				)
+				logger.debug(
+					`[WebUiStudioHandler:${this.modelName}] Request headers count: ${event.requestHeaders?.length || 0}`,
+				)
+
+				if (request.url.includes("GenerateContent")) {
+					logger.info(`[WebUiStudioHandler:${this.modelName}] 🎯 GenerateContent request intercepted!`)
+
+					// Check if this is a response by looking for response headers/status
+					const isResponse =
+						event.responseStatusCode !== undefined ||
+						(event.responseHeaders && event.responseHeaders.length > 0)
+					logger.debug(`[WebUiStudioHandler:${this.modelName}] Is response: ${isResponse}`)
+
+					if (isResponse) {
+						logger.info(`[WebUiStudioHandler:${this.modelName}] 📥 Processing GenerateContent RESPONSE`)
+						try {
+							logger.debug(`[WebUiStudioHandler:${this.modelName}] Fetching response body...`)
+							const bodyData = await cdp.send("Fetch.getResponseBody", { requestId })
+							logger.debug(`[WebUiStudioHandler:${this.modelName}] Body data received:`, {
+								base64Encoded: bodyData.base64Encoded,
+								bodyLength: bodyData.body?.length || 0,
+							})
+
+							const bodyText = bodyData.base64Encoded
+								? Buffer.from(bodyData.body, "base64").toString("utf8")
+								: bodyData.body
+
+							logger.debug(
+								`[WebUiStudioHandler:${this.modelName}] Decoded body length: ${bodyText.length}`,
+							)
+							logger.debug(
+								`[WebUiStudioHandler:${this.modelName}] Body preview: "${bodyText.substring(0, 200)}..."`,
+							)
+
+							const parsedChunks = parseGenerateContentResponse(bodyText)
+							logger.info(
+								`[WebUiStudioHandler:${this.modelName}] ✅ Parsed ${parsedChunks.length} content chunks`,
+							)
+
+							if (parsedChunks.length > 0) {
+								logger.debug(
+									`[WebUiStudioHandler:${this.modelName}] Processing ${parsedChunks.length} chunks...`,
+								)
+								// Process and accumulate chunks for streaming
+								for (let i = 0; i < parsedChunks.length; i++) {
+									const chunk = parsedChunks[i]
+									if (chunk.trim()) {
+										accumulatedContent += chunk
+										logger.debug(
+											`[WebUiStudioHandler:${this.modelName}] Chunk ${i + 1}/${parsedChunks.length}: "${chunk.substring(0, 100)}..."`,
+										)
+									}
+								}
+
+								logger.info(
+									`[WebUiStudioHandler:${this.modelName}] 📊 Total accumulated content: ${accumulatedContent.length} characters`,
+								)
+
+								// Check for regeneration triggers on accumulated content
+								const ignoreToken =
+									"Potential filter text that#1 would trigger regeneration, not used right now"
+								const applyDiffEndToken =
+									"Potential filter text#2 that would trigger regeneration, not used right now"
+								const occurrencesOfIgnoreToken = (
+									accumulatedContent.match(new RegExp(ignoreToken, "g")) || []
+								).length
+								const occurrencesOfApplyDiffEndToken = (
+									accumulatedContent.match(new RegExp(applyDiffEndToken, "g")) || []
+								).length
+
+								logger.debug(
+									`[WebUiStudioHandler:${this.modelName}] Regeneration check: ignoreToken=${occurrencesOfIgnoreToken}, applyDiffEndToken=${occurrencesOfApplyDiffEndToken}`,
+								)
+
+								if (occurrencesOfIgnoreToken > 1 || occurrencesOfApplyDiffEndToken >= 1) {
+									logger.info(
+										`[WebUiStudioHandler:${this.modelName}] 🔄 Response contains regeneration trigger. Triggering regeneration.`,
+									)
+									regenerationNeeded = true
+									interceptionComplete = true
+									logger.info(
+										`[WebUiStudioHandler:${this.modelName}] 🏁 Setting interceptionComplete = true (regeneration)`,
+									)
+									cdp.off("Fetch.requestPaused", onPaused)
+									try {
+										await cdp.send("Fetch.disable")
+									} catch {}
+									return
+								} else {
+									// Normal response - mark interception complete
+									logger.info(
+										`[WebUiStudioHandler:${this.modelName}] ✅ Normal response processed, setting interceptionComplete = true`,
+									)
+									interceptionComplete = true
+								}
+							} else {
+								logger.warn(
+									`[WebUiStudioHandler:${this.modelName}] ⚠️ No content chunks extracted from response`,
+								)
+								// Still mark as complete even if no content
+								interceptionComplete = true
+								logger.info(
+									`[WebUiStudioHandler:${this.modelName}] 🏁 Setting interceptionComplete = true (no content)`,
+								)
+							}
+						} catch (e: any) {
+							logger.error(
+								`[WebUiStudioHandler:${this.modelName}] ❌ Error processing GenerateContent response`,
+								{
+									error: e.message,
+									stack: e.stack,
+								},
+							)
+							// Mark as complete even on error to avoid infinite waiting
+							interceptionComplete = true
+							logger.info(
+								`[WebUiStudioHandler:${this.modelName}] 🏁 Setting interceptionComplete = true (error)`,
+							)
+						} finally {
+							if (!page.isClosed()) {
+								try {
+									logger.debug(
+										`[WebUiStudioHandler:${this.modelName}] Continuing request after processing`,
+									)
+									await cdp.send("Fetch.continueRequest", { requestId })
+								} catch (e: any) {
+									logger.error(
+										`[WebUiStudioHandler:${this.modelName}] Error continuing request after processing`,
+										{ error: e.message },
+									)
+								}
+							}
+						}
+					} else {
+						// This is a request, continue it
+						logger.debug(`[WebUiStudioHandler:${this.modelName}] 📤 Continuing GenerateContent REQUEST`)
+						if (!page.isClosed()) {
+							try {
+								await cdp.send("Fetch.continueRequest", { requestId })
+							} catch (e: any) {
+								logger.error(`[WebUiStudioHandler:${this.modelName}] Error continuing request`, {
+									error: e.message,
+								})
+							}
+						}
+					}
+				} else {
+					logger.debug(
+						`[WebUiStudioHandler:${this.modelName}] 🔄 Non-GenerateContent request, continuing: ${request.url}`,
+					)
+					if (!page.isClosed()) {
+						try {
+							await cdp.send("Fetch.continueRequest", { requestId })
+						} catch {}
+					}
+				}
+				logger.debug(`[WebUiStudioHandler:${this.modelName}] ===== REQUEST PROCESSING COMPLETE =====`)
+			}
+
+			cdp.on("Fetch.requestPaused", onPaused)
+
+			// Set up timeout
+			const timeoutPromise = new Promise<never>((_, reject) => {
+				logger.debug(`[WebUiStudioHandler:${this.modelName}] Setting timeout for ${this.puppeteerTimeout}ms`)
+				setTimeout(() => {
+					logger.error(
+						`[WebUiStudioHandler:${this.modelName}] Timeout reached. interceptionComplete: ${interceptionComplete}`,
+					)
+					if (!interceptionComplete) {
+						cdp.off("Fetch.requestPaused", onPaused)
+						try {
+							cdp.send("Fetch.disable")
+						} catch {}
+						reject(
+							new Error(
+								`Timeout waiting for GenerateContent response (waited ${this.puppeteerTimeout} ms).`,
+							),
+						)
+					}
+				}, this.puppeteerTimeout)
+			})
+
 			try {
+				// Add visual marker
 				await page.waitForSelector(PROMPT_TEXTAREA_SELECTOR, { visible: true })
 				await page.evaluate((sel) => {
 					const element = document.querySelector(sel) as HTMLElement
@@ -329,17 +540,14 @@ export class WebUiStudioHandler implements ApiHandler {
 						element.style.backgroundColor = "red"
 					}
 				}, PROMPT_TEXTAREA_SELECTOR)
-				await page.focus(PROMPT_TEXTAREA_SELECTOR)
 
-				const currentInitialResponseCount = await page.$$eval(MODEL_RESPONSE_ROOT_SELECTOR, (els) => els.length)
-
+				// Type the prompt
 				await page.evaluate(
 					(selector, text) => {
 						const textarea = document.querySelector(selector) as HTMLTextAreaElement
 						if (textarea) {
 							textarea.focus()
-							textarea.value = text // Directly set value
-							// Dispatch input event to ensure frameworks (Angular) detect the change
+							textarea.value = text
 							textarea.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }))
 							textarea.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }))
 						} else {
@@ -350,10 +558,7 @@ export class WebUiStudioHandler implements ApiHandler {
 					currentPrompt,
 				)
 
-				logger.debug(
-					`[WebUiStudioHandler:${this.modelName}] Initial response count: ${currentInitialResponseCount}`,
-				)
-
+				// Click send button
 				const sendButton = await page.waitForSelector(CLICKABLE_SEND_BUTTON_SELECTOR, {
 					visible: true,
 					timeout: 10000,
@@ -361,206 +566,100 @@ export class WebUiStudioHandler implements ApiHandler {
 				if (!sendButton) {
 					throw new Error("AI Studio: Send (Run) button not found or not clickable.")
 				}
+
+				// Remove visual marker
 				await page.evaluate((sel) => {
 					const element = document.querySelector(sel) as HTMLElement
 					if (element) {
-						element.style.backgroundColor = "" // Reset to normal
+						element.style.backgroundColor = ""
 					}
 				}, PROMPT_TEXTAREA_SELECTOR)
+
 				await sendButton.click()
 				logger.debug(`[WebUiStudioHandler:${this.modelName}] Clicked send button.`)
 
-				// Wait for the "Run" button to change to "Stop" (add .stoppable class and spinner)
+				// Wait for interception to complete or timeout
+				logger.debug(`[WebUiStudioHandler:${this.modelName}] Waiting for interception to complete...`)
+				await Promise.race([
+					new Promise<void>((resolve) => {
+						const checkComplete = () => {
+							logger.debug(
+								`[WebUiStudioHandler:${this.modelName}] Checking interception complete: ${interceptionComplete}`,
+							)
+							if (interceptionComplete) {
+								logger.debug(
+									`[WebUiStudioHandler:${this.modelName}] Interception completed successfully`,
+								)
+								resolve()
+							} else {
+								setTimeout(checkComplete, 100) // Check every 100ms
+							}
+						}
+						checkComplete()
+					}),
+					timeoutPromise,
+				])
+
+				// Clean up interception
+				cdp.off("Fetch.requestPaused", onPaused)
+				try {
+					await cdp.send("Fetch.disable")
+				} catch {}
+
 				logger.debug(
-					`[WebUiStudioHandler:${this.modelName}] Waiting for processing button to appear: ${PROCESSING_STOPPABLE_BUTTON_SELECTOR}`,
+					`[WebUiStudioHandler:${this.modelName}] Interception complete. Accumulated content length: ${accumulatedContent.length}`,
 				)
-				await page.waitForSelector(PROCESSING_STOPPABLE_BUTTON_SELECTOR, {
-					visible: true,
-					timeout: this.puppeteerTimeout,
-				})
-				logger.debug(`[WebUiStudioHandler:${this.modelName}] Processing button appeared.`)
 
-				// Wait for the "Stop" button/state to disappear (processing finished)
-				logger.debug(
-					`[WebUiStudioHandler:${this.modelName}] Waiting for processing button to disappear: ${PROCESSING_STOPPABLE_BUTTON_SELECTOR}`,
-				)
-				await page.waitForSelector(PROCESSING_STOPPABLE_BUTTON_SELECTOR, {
-					hidden: true,
-					timeout: this.puppeteerTimeout,
-				})
-				logger.debug(`[WebUiStudioHandler:${this.modelName}] Processing (stoppable) button disappeared.`)
-
-				// Check if the Run button is now disabled (the state user mentioned for an extra pause)
-				const isRunButtonDisabledAfterProcessing = await page.evaluate((selector) => {
-					const button = document.querySelector(selector)
-					return button?.hasAttribute("disabled") && !button.classList.contains("stoppable")
-				}, SUBMIT_BUTTON_BASE_SELECTOR)
-
-				if (isRunButtonDisabledAfterProcessing) {
+				if (regenerationNeeded) {
 					logger.info(
-						`[WebUiStudioHandler:${this.modelName}] Run button is disabled after processing. Waiting 11 seconds before reading output.`,
-					)
-					await new Promise((resolve) => setTimeout(resolve, 500))
-				}
-
-				// The UI is now expected to have finished processing the request.
-				// The Run button might be disabled if the input text area is empty.
-				// We proceed directly to look for the response.
-				logger.debug(`[WebUiStudioHandler:${this.modelName}] Proceeding to find response content.`)
-
-				const waitSuccess = await page.waitForFunction(
-					(sel, count, checkInterval, funcTimeout) => {
-						return new Promise((resolve) => {
-							const startTime = Date.now()
-							const interval = setInterval(() => {
-								const currentCount = document.querySelectorAll(sel).length
-								if (currentCount > count) {
-									clearInterval(interval)
-									resolve(true)
-								} else if (Date.now() - startTime > funcTimeout) {
-									clearInterval(interval)
-									console.warn(
-										`waitForFunction timeout for ${sel}. Current count: ${currentCount}, expected > ${count}`,
-									)
-									resolve(false)
-								}
-							}, checkInterval)
-						})
-					},
-					{ timeout: this.puppeteerTimeout }, // Overall timeout for this waitForFunction
-					MODEL_RESPONSE_ROOT_SELECTOR,
-					currentInitialResponseCount,
-					200, // checkInterval
-					this.puppeteerTimeout - 1000, // funcTimeout (slightly less than overall)
-				)
-
-				if (!waitSuccess) {
-					const finalCount = await page.$$eval(MODEL_RESPONSE_ROOT_SELECTOR, (els) => els.length)
-					throw new Error(
-						`Timeout waiting for new model response to appear. Initial: ${currentInitialResponseCount}, Final: ${finalCount}. Selector: ${MODEL_RESPONSE_ROOT_SELECTOR}`,
-					)
-				}
-				logger.debug(`[WebUiStudioHandler:${this.modelName}] New model response root appeared.`)
-
-				const currentResponseRoots = await page.$$(MODEL_RESPONSE_ROOT_SELECTOR)
-				logger.debug(
-					`[WebUiStudioHandler:${this.modelName}] Found ${currentResponseRoots.length} response roots. Expected > ${currentInitialResponseCount}`,
-				)
-
-				if (currentInitialResponseCount >= currentResponseRoots.length) {
-					throw new Error(
-						`New model response root not found after waitForFunction. Expected >${currentInitialResponseCount}, got ${currentResponseRoots.length}`,
-					)
-				}
-				// The new response is the one at index currentInitialResponseCount (if one new) or the last one.
-				// It's safer to assume the last one is the newest if multiple could appear.
-				const newModelResponseElement = currentResponseRoots[currentResponseRoots.length - 1]
-
-				// --- REWORKED LOGIC STARTS HERE ---
-				// New Method: Find the 'more options' button, click it, then click 'copy markdown'
-				logger.debug(
-					`[WebUiStudioHandler:${this.modelName}] Finding "More options" button in the new response turn.`,
-				)
-				const moreOptionsButton = await newModelResponseElement.$(MORE_OPTIONS_BUTTON_SELECTOR)
-				if (!moreOptionsButton) {
-					throw new Error("Could not find the 'More options' button on the new response.")
-				}
-
-				await moreOptionsButton.click()
-				logger.debug(`[WebUiStudioHandler:${this.modelName}] Clicked "More options" button.`)
-
-				// --- START OF NEW, ROBUST BLOCK ---
-				// Wait for the button to be visible in the DOM
-				await page.waitForSelector(COPY_MARKDOWN_BUTTON_SELECTOR, { visible: true, timeout: 10000 })
-				logger.debug(`[WebUiStudioHandler:${this.modelName}] "Copy markdown" button is visible.`)
-
-				// Use page.evaluate to perform a more reliable, native click.
-				// This is less prone to race conditions with the site's JavaScript framework.
-				const clicked = await page.evaluate((selector) => {
-					const button = document.querySelector(selector) as HTMLElement
-					if (button) {
-						button.click()
-						return true // Signal that the click was attempted
-					}
-					return false // Signal that the button was not found in the DOM at the time of execution
-				}, COPY_MARKDOWN_BUTTON_SELECTOR)
-
-				if (!clicked) {
-					throw new Error(
-						"Failed to find and click 'Copy markdown' button via page.evaluate. The button may have disappeared.",
-					)
-				}
-
-				logger.debug(`[WebUiStudioHandler:${this.modelName}] Executed native click on "Copy markdown" button.`)
-
-				// Add a brief pause to ensure the OS-level clipboard operation has time to complete
-				await new Promise((resolve) => setTimeout(resolve, 250))
-				// --- END OF NEW, ROBUST BLOCK ---
-
-				// Read the content directly from the browser's clipboard
-				responseTextRaw = await page.evaluate(() => navigator.clipboard.readText())
-				if (!responseTextRaw) {
-					throw new Error("Copied text from clipboard was empty.")
-				}
-				// --- REWORKED LOGIC ENDS HERE ---
-
-				decodedResponseText = responseTextRaw.trim()
-				logger.debug(
-					`[WebUiStudioHandler:${this.modelName}] Response: "${decodedResponseText.substring(0, 200)}..."`,
-				)
-
-				const ignoreToken = "Potential filter text that#1 would trigger regeneration, not used right now"
-				const applyDiffEndToken = "Potential filter text#2 that would trigger regeneration, not used right now"
-				const occurrencesOfIgnoreToken = (decodedResponseText.match(new RegExp(ignoreToken, "g")) || []).length
-				const occurrencesOfApplyDiffEndToken = (
-					decodedResponseText.match(new RegExp(applyDiffEndToken, "g")) || []
-				).length
-
-				if (occurrencesOfIgnoreToken > 1 || occurrencesOfApplyDiffEndToken >= 1) {
-					logger.warn(
-						`[WebUiStudioHandler:${this.modelName}] Response contains regeneration trigger. Regenerating.`,
+						`[WebUiStudioHandler:${this.modelName}] Regeneration needed, retrying with regeneration prompt`,
 					)
 					currentPrompt = this.regenerationPrompt
-					// Continue loop to resend
-				} else {
-					yield { type: "text", text: decodedResponseText }
+					continue // Retry with regeneration prompt
+				}
+
+				if (accumulatedContent.trim()) {
+					logger.debug(
+						`[WebUiStudioHandler:${this.modelName}] Yielding final response: "${accumulatedContent.substring(0, 200)}..."`,
+					)
+					yield { type: "text", text: accumulatedContent }
 					yield { type: "usage", inputTokens: 0, outputTokens: 0 }
-					break // Exit loop if no regeneration trigger
+					break // Success, exit retry loop
+				} else {
+					logger.error(`[WebUiStudioHandler:${this.modelName}] No content accumulated from response`)
+					throw new Error("No content received from GenerateContent response")
 				}
 			} catch (error: any) {
-				const errorMsg = error?.message || "Unknown Puppeteer interaction error"
-				logger.error(`[WebUiStudioHandler:${this.modelName}] Puppeteer interaction error`, {
-					details: errorMsg,
-					stack: error?.stack,
-					errorObj: error,
-				})
-				if (this._page?.isClosed() || (this._browser && !this._browser.isConnected())) {
-					logger.warn(
-						`[WebUiStudioHandler:${this.modelName}] Page or browser disconnected during error handling.`,
-					)
-					this._isInitialized = false
-					this._initializationPromise = null // Reset to allow re-initialization
+				const errorMsg = error?.message || "Unknown error during network interception"
+
+				if (errorMsg === "Regeneration required") {
+					// This is a controlled regeneration flow
+					currentPrompt = this.regenerationPrompt
+					// Loop will continue to the next attempt
+				} else {
+					logger.error(`[WebUiStudioHandler:${this.modelName}] Network interception error`, {
+						details: errorMsg,
+						stack: error?.stack,
+					})
+
+					if (this._page?.isClosed() || (this._browser && !this._browser.isConnected())) {
+						logger.warn(
+							`[WebUiStudioHandler:${this.modelName}] Page or browser disconnected during error handling.`,
+						)
+						this._isInitialized = false
+						this._initializationPromise = null // Reset to allow re-initialization
+					}
+					throw new Error(errorMsg, { cause: error })
 				}
-				throw new Error(errorMsg, { cause: error })
 			}
 		}
 
-		const ignoreToken = "IGNORE_WHEN_COPYING_END"
-		const applyDiffEndToken = "</apply_diff>\n```" // Hex: 3c 2f 61 70 70 6c 79 5f 64 69 66 66 3e 0d 0a 60 60 60
-		const occurrencesOfIgnoreToken = (decodedResponseText.match(new RegExp(ignoreToken, "g")) || []).length
-		const occurrencesOfApplyDiffEndToken = (decodedResponseText.match(new RegExp(applyDiffEndToken, "g")) || [])
-			.length
-
-		if (
-			attemptCount >= MAX_RETRY_ATTEMPTS &&
-			(occurrencesOfIgnoreToken > 1 || occurrencesOfApplyDiffEndToken >= 1)
-		) {
-			logger.error(
-				`[WebUiStudioHandler:${this.modelName}] Max retry attempts reached, but response still contains regeneration trigger.`,
-			)
+		// Handle max retries reached
+		if (attemptCount >= MAX_RETRY_ATTEMPTS) {
+			logger.error(`[WebUiStudioHandler:${this.modelName}] Max retry attempts reached.`)
 			yield {
 				type: "text",
-				text: `Error: Max regeneration attempts reached. Response still contains regeneration trigger.\n\n${responseTextRaw}`,
+				text: `Error: Max regeneration attempts reached. Unable to get valid response.`,
 			}
 			yield { type: "usage", inputTokens: 0, outputTokens: 0 }
 		}
@@ -629,6 +728,153 @@ export class WebUiStudioHandler implements ApiHandler {
 		}
 		await this._cleanupPuppeteerResources()
 		logger.info(`[WebUiStudioHandler:${this.modelName}] Disposed.`)
+	}
+}
+
+/**
+ * Check if a string is actual content (not metadata)
+ * @param str The string to check
+ * @returns true if the string is content, false if it's metadata
+ */
+function isContentString(str: string): boolean {
+	// Filter out metadata strings
+	if (str.startsWith("v1:")) return false // Version tokens
+	if (str === "model") return false // Model identifier
+	if (/^\d{16,}$/.test(str)) return false // Long numeric strings (timestamps/IDs)
+	if (str.length < 10 && !str.includes(" ")) return false // Very short non-spaced strings
+
+	// Allow content strings
+	return true
+}
+
+/**
+ * Recursively find all string values in a nested object/array structure
+ * @param obj The object/array to search
+ * @returns Array of all string values found
+ */
+function findAllStrings(obj: any): string[] {
+	const results: string[] = []
+
+	if (typeof obj === "string" && obj.trim()) {
+		results.push(obj)
+	} else if (Array.isArray(obj)) {
+		for (const item of obj) {
+			results.push(...findAllStrings(item))
+		}
+	} else if (obj && typeof obj === "object") {
+		for (const key in obj) {
+			results.push(...findAllStrings(obj[key]))
+		}
+	}
+
+	return results
+}
+
+/**
+ * Parse GenerateContent response and extract text content chunks
+ * @param jsonString Raw JSON response from GenerateContent endpoint
+ * @returns Array of extracted text content chunks
+ */
+function parseGenerateContentResponse(jsonString: string): string[] {
+	try {
+		const data = JSON.parse(jsonString)
+		logger.debug("[WebUiStudioHandler] Parsed JSON response, chunks count:", data?.length || 0)
+
+		// Handle the deeply nested structure from the examples
+		if (!Array.isArray(data) || data.length === 0) {
+			logger.debug("[WebUiStudioHandler] No chunks in response")
+			return []
+		}
+
+		const extractedChunks: string[] = []
+
+		// Process each chunk in the response
+		for (let i = 0; i < data.length; i++) {
+			const chunk = data[i]
+			logger.debug(`[WebUiStudioHandler] Processing chunk ${i}: ${JSON.stringify(chunk, null, 2)}`)
+
+			if (!Array.isArray(chunk) || chunk.length === 0) {
+				logger.debug(`[WebUiStudioHandler] Skipping non-array or empty chunk ${i}`)
+				continue
+			}
+
+			try {
+				// Try multiple navigation patterns to find content
+				let content: any = null
+				let foundPath = ""
+
+				// Pattern 1: Original path
+				if (chunk?.[0]?.[0]?.[0]?.[0]?.[0]?.[0]?.[0]?.[1]) {
+					content = chunk[0][0][0][0][0][0][0][1]
+					foundPath = "chunk[0][0][0][0][0][0][0][1]"
+				}
+				// Pattern 2: Alternative nesting
+				else if (chunk?.[0]?.[0]?.[0]?.[0]?.[0]?.[0]?.[0]?.[0]?.[1]) {
+					content = chunk[0][0][0][0][0][0][0][0][1]
+					foundPath = "chunk[0][0][0][0][0][0][0][0][1]"
+				}
+				// Pattern 3: Direct access
+				else if (
+					chunk[0] &&
+					Array.isArray(chunk[0]) &&
+					chunk[0][0] &&
+					Array.isArray(chunk[0][0]) &&
+					chunk[0][0][0] &&
+					Array.isArray(chunk[0][0][0]) &&
+					chunk[0][0][0][0] &&
+					Array.isArray(chunk[0][0][0][0]) &&
+					chunk[0][0][0][0][0] &&
+					Array.isArray(chunk[0][0][0][0][0]) &&
+					chunk[0][0][0][0][0][0] &&
+					Array.isArray(chunk[0][0][0][0][0][0]) &&
+					chunk[0][0][0][0][0][0][0] &&
+					chunk[0][0][0][0][0][0][0][1]
+				) {
+					content = chunk[0][0][0][0][0][0][0][1]
+					foundPath = "direct access pattern"
+				}
+
+				if (content && typeof content === "string") {
+					extractedChunks.push(content)
+					logger.info(
+						`[WebUiStudioHandler] ✅ Extracted chunk ${i} via ${foundPath}: "${content.substring(0, 100)}..."`,
+					)
+				} else {
+					logger.debug(`[WebUiStudioHandler] No string content found in chunk ${i} via known patterns`)
+
+					// Fallback: Recursively search for content strings, filtering out metadata
+					const foundStrings = findAllStrings(chunk)
+					if (foundStrings.length > 0) {
+						for (const str of foundStrings) {
+							if (str.trim() && isContentString(str)) {
+								extractedChunks.push(str)
+								logger.info(
+									`[WebUiStudioHandler] ✅ Extracted via recursive search: "${str.substring(0, 100)}..."`,
+								)
+							} else {
+								logger.debug(
+									`[WebUiStudioHandler] Filtered out metadata string: "${str.substring(0, 50)}..."`,
+								)
+							}
+						}
+					} else {
+						logger.debug(`[WebUiStudioHandler] No strings found in chunk ${i} even with recursive search`)
+					}
+				}
+			} catch (e) {
+				logger.debug(`[WebUiStudioHandler] Error processing chunk ${i}:`, { error: e })
+				continue
+			}
+		}
+
+		logger.debug(`[WebUiStudioHandler] Total extracted chunks: ${extractedChunks.length}`)
+		return extractedChunks
+	} catch (e) {
+		logger.error("[WebUiStudioHandler] Failed to parse GenerateContent response", {
+			error: e,
+			jsonString: jsonString.substring(0, 200) + "...",
+		})
+		return []
 	}
 }
 
