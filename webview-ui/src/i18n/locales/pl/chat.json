@@ -175,7 +175,11 @@
 		"wantsToInsertAtEnd": "Roo chce dodać zawartość na końcu tego pliku:",
 		"wantsToReadAndXMore": "Roo chce przeczytać ten plik i {{count}} więcej:",
 		"wantsToReadMultiple": "Roo chce odczytać wiele plików:",
-		"wantsToApplyBatchChanges": "Roo chce zastosować zmiany do wielu plików:"
+		"wantsToApplyBatchChanges": "Roo chce zastosować zmiany do wielu plików:",
+		"wantsToGenerateImage": "Roo chce wygenerować obraz:",
+		"wantsToGenerateImageOutsideWorkspace": "Roo chce wygenerować obraz poza obszarem roboczym:",
+		"wantsToGenerateImageProtected": "Roo chce wygenerować obraz w chronionym miejscu:",
+		"didGenerateImage": "Roo wygenerował obraz:"
 	},
 	"directoryOperations": {
 		"wantsToViewTopLevel": "Roo chce zobaczyć pliki najwyższego poziomu w tym katalogu:",
@@ -265,6 +269,12 @@
 	},
 	"announcement": {
 		"title": "🎉 Roo Code {{version}} wydany",
+		"stealthModel": {
+			"feature": "Model stealth Sonic to teraz <bold>Grok Code Fast</bold>! Ten wysokowydajny model rozumowania jest dostępny jako <code>grok-code-fast-1</code> u dostawcy <bold>xAI (Grok)</bold>.",
+			"note": "W podzięce za wszystkie pomocne opinie o Sonic, xAI rozszerza bezpłatny dostęp do <code>grok-code-fast-1</code> na kolejny tydzień za pośrednictwem dostawcy <bold>Roo Code Cloud</bold>.",
+			"connectButton": "Połącz z Roo Code Cloud",
+			"selectModel": "Odwiedź <settingsLink>Ustawienia</settingsLink>, aby zaktualizować konfigurację dostawcy."
+		},
 		"description": "Roo Code {{version}} wprowadza potężne nowe funkcje i znaczące ulepszenia, aby ulepszyć Twój przepływ pracy programistycznej.",
 		"whatsNew": "Co nowego",
 		"feature1": "<bold>Kolejka Wiadomości</bold>: Umieszczaj wiele wiadomości w kolejce podczas pracy Roo, pozwalając na kontynuowanie planowania przepływu pracy bez przerw.",
@@ -349,9 +359,9 @@
 		"ariaLabel": "Wersja {{version}} - Kliknij, aby wyświetlić informacje o wydaniu"
 	},
 	"rooCloudCTA": {
-		"title": "Roo Code Cloud już wkrótce!",
+		"title": "Roo Code Cloud się rozwija!",
 		"description": "Uruchamiaj zdalne agenty w chmurze, uzyskuj dostęp do swoich zadań z dowolnego miejsca, współpracuj z innymi i wiele więcej.",
-		"joinWaitlist": "Dołącz do listy oczekujących, aby uzyskać wczesny dostęp."
+		"joinWaitlist": "Zarejestruj się, aby otrzymywać najnowsze aktualizacje."
 	},
 	"editMessage": {
 		"placeholder": "Edytuj swoją wiadomość..."
@@ -362,7 +372,8 @@
 	"slashCommands": {
 		"tooltip": "Zarządzaj poleceniami slash",
 		"title": "Polecenia Slash",
-		"description": "Twórz niestandardowe polecenia slash dla szybkiego dostępu do często używanych promptów i przepływów pracy. <DocsLink>Dokumentacja</DocsLink>",
+		"description": "Używaj wbudowanych poleceń slash lub twórz niestandardowe dla szybkiego dostępu do często używanych promptów i przepływów pracy. <DocsLink>Dokumentacja</DocsLink>",
+		"builtInCommands": "Polecenia Wbudowane",
 		"globalCommands": "Polecenia Globalne",
 		"workspaceCommands": "Polecenia Obszaru Roboczego",
 		"globalCommand": "Polecenie globalne",

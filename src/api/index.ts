@@ -13,7 +13,6 @@ import {
 	VertexHandler,
 	AnthropicVertexHandler,
 	OpenAiHandler,
-	OllamaHandler,
 	LmStudioHandler,
 	GeminiHandler,
 	OpenAiNativeHandler,
@@ -31,6 +30,7 @@ import {
 	ChutesHandler,
 	LiteLLMHandler,
 	ClaudeCodeHandler,
+	QwenCodeHandler,
 	SambaNovaHandler,
 	IOIntelligenceHandler,
 	DoubaoHandler,
@@ -38,7 +38,11 @@ import {
 	FireworksHandler,
 	WebUiGeminiHandler,
 	WebUiStudioHandler,
+	RooHandler,
+	FeatherlessHandler,
+	VercelAiGatewayHandler,
 } from "./providers"
+import { NativeOllamaHandler } from "./providers/native-ollama"
 
 export interface SingleCompletionHandler {
 	completePrompt(prompt: string): Promise<string>
@@ -54,6 +58,14 @@ export interface ApiHandlerCreateMessageMetadata {
 	 * Used to enforce "skip once" after a condense operation.
 	 */
 	suppressPreviousResponseId?: boolean
+	/**
+	 * Controls whether the response should be stored for 30 days in OpenAI's Responses API.
+	 * When true (default), responses are stored and can be referenced in future requests
+	 * using the previous_response_id for efficient conversation continuity.
+	 * Set to false to opt out of response storage for privacy or compliance reasons.
+	 * @default true
+	 */
+	store?: boolean
 }
 
 export interface ApiHandler {
@@ -97,7 +109,7 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 		case "openai":
 			return new OpenAiHandler(options)
 		case "ollama":
-			return new OllamaHandler(options)
+			return new NativeOllamaHandler(options)
 		case "lmstudio":
 			return new LmStudioHandler(options)
 		case "gemini":
@@ -108,6 +120,8 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new DeepSeekHandler(options)
 		case "doubao":
 			return new DoubaoHandler(options)
+		case "qwen-code":
+			return new QwenCodeHandler(options)
 		case "moonshot":
 			return new MoonshotHandler(options)
 		case "vscode-lm":
@@ -146,6 +160,14 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new WebUiGeminiHandler(options)
 		case "web-ui-studio":
 			return new WebUiStudioHandler(options)
+		case "roo":
+			// Never throw exceptions from provider constructors
+			// The provider-proxy server will handle authentication and return appropriate error codes
+			return new RooHandler(options)
+		case "featherless":
+			return new FeatherlessHandler(options)
+		case "vercel-ai-gateway":
+			return new VercelAiGatewayHandler(options)
 		default:
 			apiProvider satisfies "gemini-cli" | undefined
 			return new AnthropicHandler(options)

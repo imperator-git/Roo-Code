@@ -175,7 +175,11 @@
 		"wantsToInsertAtEnd": "Roo bu dosyanın sonuna içerik eklemek istiyor:",
 		"wantsToReadAndXMore": "Roo bu dosyayı ve {{count}} tane daha okumak istiyor:",
 		"wantsToReadMultiple": "Roo birden fazla dosya okumak istiyor:",
-		"wantsToApplyBatchChanges": "Roo birden fazla dosyaya değişiklik uygulamak istiyor:"
+		"wantsToApplyBatchChanges": "Roo birden fazla dosyaya değişiklik uygulamak istiyor:",
+		"wantsToGenerateImage": "Roo bir görsel oluşturmak istiyor:",
+		"wantsToGenerateImageOutsideWorkspace": "Roo çalışma alanının dışında bir görsel oluşturmak istiyor:",
+		"wantsToGenerateImageProtected": "Roo korumalı bir konumda görsel oluşturmak istiyor:",
+		"didGenerateImage": "Roo bir görsel oluşturdu:"
 	},
 	"directoryOperations": {
 		"wantsToViewTopLevel": "Roo bu dizindeki üst düzey dosyaları görüntülemek istiyor:",
@@ -265,6 +269,12 @@
 	},
 	"announcement": {
 		"title": "🎉 Roo Code {{version}} Yayınlandı",
+		"stealthModel": {
+			"feature": "Sonic gizli model artık <bold>Grok Code Fast</bold>! Bu yüksek performanslı akıl yürütme modeli <bold>xAI (Grok)</bold> sağlayıcısı altında <code>grok-code-fast-1</code> olarak mevcut.",
+			"note": "Sonic hakkındaki tüm yararlı geri bildirimler için teşekkür olarak, xAI <code>grok-code-fast-1</code>'e ücretsiz erişimi <bold>Roo Code Cloud</bold> sağlayıcısı üzerinden bir hafta daha uzatıyor.",
+			"connectButton": "Roo Code Cloud'a bağlan",
+			"selectModel": "Sağlayıcı yapılandırmanızı güncellemek için <settingsLink>Ayarlar</settingsLink>'ı ziyaret edin."
+		},
 		"description": "Roo Code {{version}}, geliştirme iş akışınızı geliştirmek için güçlü yeni özellikler ve önemli iyileştirmeler getiriyor.",
 		"whatsNew": "Yenilikler",
 		"feature1": "<bold>Mesaj Kuyruğu</bold>: Roo çalışırken birden fazla mesajı kuyruğa alın, iş akışınızı kesintisiz olarak planlamaya devam etmenizi sağlar.",
@@ -349,9 +359,9 @@
 		"ariaLabel": "Sürüm {{version}} - Sürüm notlarını görüntülemek için tıklayın"
 	},
 	"rooCloudCTA": {
-		"title": "Roo Code Cloud yakında geliyor!",
+		"title": "Roo Code Cloud gelişiyor!",
 		"description": "Bulutta uzak ajanlar çalıştırın, görevlerinize her yerden erişin, başkalarıyla işbirliği yapın ve daha fazlası.",
-		"joinWaitlist": "Erken erişim için bekleme listesine katılın."
+		"joinWaitlist": "En son güncellemeleri almak için kaydolun."
 	},
 	"editMessage": {
 		"placeholder": "Mesajını düzenle..."
@@ -362,7 +372,8 @@
 	"slashCommands": {
 		"tooltip": "Eğik çizgi komutlarını yönet",
 		"title": "Eğik Çizgi Komutları",
-		"description": "Sık kullanılan komut istemleri ve iş akışlarına hızlı erişim için özel eğik çizgi komutları oluşturun. <DocsLink>Belgeler</DocsLink>",
+		"description": "Yerleşik eğik çizgi komutlarını kullanın veya sık kullanılan komut istemleri ve iş akışlarına hızlı erişim için özel komutlar oluşturun. <DocsLink>Belgeler</DocsLink>",
+		"builtInCommands": "Yerleşik Komutlar",
 		"globalCommands": "Genel Komutlar",
 		"workspaceCommands": "Çalışma Alanı Komutları",
 		"globalCommand": "Genel komut",

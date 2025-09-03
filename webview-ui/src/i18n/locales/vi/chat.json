@@ -175,7 +175,11 @@
 		"wantsToInsertAtEnd": "Roo muốn thêm nội dung vào cuối tệp này:",
 		"wantsToReadAndXMore": "Roo muốn đọc tệp này và {{count}} tệp khác:",
 		"wantsToReadMultiple": "Roo muốn đọc nhiều tệp:",
-		"wantsToApplyBatchChanges": "Roo muốn áp dụng thay đổi cho nhiều tệp:"
+		"wantsToApplyBatchChanges": "Roo muốn áp dụng thay đổi cho nhiều tệp:",
+		"wantsToGenerateImage": "Roo muốn tạo một hình ảnh:",
+		"wantsToGenerateImageOutsideWorkspace": "Roo muốn tạo hình ảnh bên ngoài không gian làm việc:",
+		"wantsToGenerateImageProtected": "Roo muốn tạo hình ảnh ở vị trí được bảo vệ:",
+		"didGenerateImage": "Roo đã tạo một hình ảnh:"
 	},
 	"directoryOperations": {
 		"wantsToViewTopLevel": "Roo muốn xem các tệp cấp cao nhất trong thư mục này:",
@@ -265,6 +269,12 @@
 	},
 	"announcement": {
 		"title": "🎉 Roo Code {{version}} Đã phát hành",
+		"stealthModel": {
+			"feature": "Mô hình stealth Sonic giờ là <bold>Grok Code Fast</bold>! Mô hình lý luận hiệu năng cao này có sẵn dưới dạng <code>grok-code-fast-1</code> trong nhà cung cấp <bold>xAI (Grok)</bold>.",
+			"note": "Để cảm ơn tất cả các phản hồi hữu ích về Sonic, xAI đang mở rộng quyền truy cập miễn phí vào <code>grok-code-fast-1</code> thêm một tuần nữa thông qua nhà cung cấp <bold>Roo Code Cloud</bold>.",
+			"connectButton": "Kết nối với Roo Code Cloud",
+			"selectModel": "Truy cập <settingsLink>Cài đặt</settingsLink> để cập nhật cấu hình nhà cung cấp của bạn."
+		},
 		"description": "Roo Code {{version}} mang đến các tính năng mạnh mẽ mới và cải tiến đáng kể để nâng cao quy trình phát triển của bạn.",
 		"whatsNew": "Có gì mới",
 		"feature1": "<bold>Hàng đợi Tin nhắn</bold>: Xếp hàng nhiều tin nhắn trong khi Roo đang làm việc, cho phép bạn tiếp tục lập kế hoạch quy trình làm việc mà không bị gián đoạn.",
@@ -349,9 +359,9 @@
 		"ariaLabel": "Phiên bản {{version}} - Nhấp để xem ghi chú phát hành"
 	},
 	"rooCloudCTA": {
-		"title": "Roo Code Cloud sắp ra mắt!",
+		"title": "Roo Code Cloud đang phát triển!",
 		"description": "Chạy các agent từ xa trên cloud, truy cập các tác vụ của bạn từ mọi nơi, cộng tác với người khác và nhiều hơn nữa.",
-		"joinWaitlist": "Tham gia danh sách chờ để được truy cập sớm."
+		"joinWaitlist": "Đăng ký để nhận các cập nhật mới nhất."
 	},
 	"editMessage": {
 		"placeholder": "Chỉnh sửa tin nhắn của bạn..."
@@ -362,7 +372,8 @@
 	"slashCommands": {
 		"tooltip": "Quản lý lệnh gạch chéo",
 		"title": "Lệnh Gạch Chéo",
-		"description": "Tạo lệnh gạch chéo tùy chỉnh để truy cập nhanh vào các lời nhắc và quy trình làm việc thường dùng. <DocsLink>Tài liệu</DocsLink>",
+		"description": "Sử dụng lệnh gạch chéo tích hợp sẵn hoặc tạo tùy chỉnh để truy cập nhanh vào các lời nhắc và quy trình làm việc thường dùng. <DocsLink>Tài liệu</DocsLink>",
+		"builtInCommands": "Lệnh Tích Hợp",
 		"globalCommands": "Lệnh Toàn Cục",
 		"workspaceCommands": "Lệnh Không Gian Làm Việc",
 		"globalCommand": "Lệnh toàn cục",

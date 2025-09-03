@@ -11,6 +11,7 @@ import {
 	type ProviderSettings,
 	type ProviderSettingsEntry,
 	type TaskEvent,
+	type CreateTaskOptions,
 	RooCodeEventName,
 	TaskCommandName,
 	isSecretStateKey,
@@ -78,6 +79,17 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 						await vscode.commands.executeCommand("workbench.action.files.saveFiles")
 						await vscode.commands.executeCommand("workbench.action.closeWindow")
 						break
+					case TaskCommandName.ResumeTask:
+						this.log(`[API] ResumeTask -> ${data}`)
+						try {
+							await this.resumeTask(data)
+						} catch (error) {
+							const errorMessage = error instanceof Error ? error.message : String(error)
+							this.log(`[API] ResumeTask failed for taskId ${data}: ${errorMessage}`)
+							// Don't rethrow - we want to prevent IPC server crashes
+							// The error is logged for debugging purposes
+						}
+						break
 				}
 			})
 		}
@@ -117,51 +129,27 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			provider = this.sidebarProvider
 		}
 
-		if (configuration) {
-			await provider.setValues(configuration)
-
-			if (configuration.allowedCommands) {
-				await vscode.workspace
-					.getConfiguration(Package.name)
-					.update("allowedCommands", configuration.allowedCommands, vscode.ConfigurationTarget.Global)
-			}
-
-			if (configuration.deniedCommands) {
-				await vscode.workspace
-					.getConfiguration(Package.name)
-					.update("deniedCommands", configuration.deniedCommands, vscode.ConfigurationTarget.Global)
-			}
-
-			if (configuration.commandExecutionTimeout !== undefined) {
-				await vscode.workspace
-					.getConfiguration(Package.name)
-					.update(
-						"commandExecutionTimeout",
-						configuration.commandExecutionTimeout,
-						vscode.ConfigurationTarget.Global,
-					)
-			}
-		}
-
 		await provider.removeClineFromStack()
 		await provider.postStateToWebview()
 		await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
 		await provider.postMessageToWebview({ type: "invoke", invoke: "newChat", text, images })
 
-		const cline = await provider.initClineWithTask(text, images, undefined, {
+		const options: CreateTaskOptions = {
 			consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
-		})
+		}
 
-		if (!cline) {
+		const task = await provider.createTask(text, images, undefined, options, configuration)
+
+		if (!task) {
 			throw new Error("Failed to create task due to policy restrictions")
 		}
 
-		return cline.taskId
+		return task.taskId
 	}
 
 	public async resumeTask(taskId: string): Promise<void> {
 		const { historyItem } = await this.sidebarProvider.getTaskWithId(taskId)
-		await this.sidebarProvider.initClineWithHistoryItem(historyItem)
+		await this.sidebarProvider.createTaskWithHistoryItem(historyItem)
 		await this.sidebarProvider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
 	}
 
@@ -242,11 +230,29 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				this.taskMap.delete(task.taskId)
 			})
 
-			// Optional:
-			// RooCodeEventName.TaskFocused
-			// RooCodeEventName.TaskUnfocused
-			// RooCodeEventName.TaskActive
-			// RooCodeEventName.TaskIdle
+			task.on(RooCodeEventName.TaskFocused, () => {
+				this.emit(RooCodeEventName.TaskFocused, task.taskId)
+			})
+
+			task.on(RooCodeEventName.TaskUnfocused, () => {
+				this.emit(RooCodeEventName.TaskUnfocused, task.taskId)
+			})
+
+			task.on(RooCodeEventName.TaskActive, () => {
+				this.emit(RooCodeEventName.TaskActive, task.taskId)
+			})
+
+			task.on(RooCodeEventName.TaskInteractive, () => {
+				this.emit(RooCodeEventName.TaskInteractive, task.taskId)
+			})
+
+			task.on(RooCodeEventName.TaskResumable, () => {
+				this.emit(RooCodeEventName.TaskResumable, task.taskId)
+			})
+
+			task.on(RooCodeEventName.TaskIdle, () => {
+				this.emit(RooCodeEventName.TaskIdle, task.taskId)
+			})
 
 			// Subtask Lifecycle
 

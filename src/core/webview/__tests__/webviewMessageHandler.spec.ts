@@ -32,9 +32,9 @@ const mockClineProvider = {
 	},
 	log: vi.fn(),
 	postStateToWebview: vi.fn(),
-	getCurrentCline: vi.fn(),
+	getCurrentTask: vi.fn(),
 	getTaskWithId: vi.fn(),
-	initClineWithHistoryItem: vi.fn(),
+	createTaskWithHistoryItem: vi.fn(),
 } as unknown as ClineProvider
 
 import { t } from "../../../i18n"
@@ -178,6 +178,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		expect(mockGetModels).toHaveBeenCalledWith({ provider: "requesty", apiKey: "requesty-key" })
 		expect(mockGetModels).toHaveBeenCalledWith({ provider: "glama" })
 		expect(mockGetModels).toHaveBeenCalledWith({ provider: "unbound", apiKey: "unbound-key" })
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: "vercel-ai-gateway" })
 		expect(mockGetModels).toHaveBeenCalledWith({
 			provider: "litellm",
 			apiKey: "litellm-key",
@@ -195,6 +196,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				litellm: mockModels,
 				ollama: {},
 				lmstudio: {},
+				"vercel-ai-gateway": mockModels,
 			},
 		})
 	})
@@ -282,6 +284,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				litellm: {},
 				ollama: {},
 				lmstudio: {},
+				"vercel-ai-gateway": mockModels,
 			},
 		})
 	})
@@ -302,6 +305,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			.mockRejectedValueOnce(new Error("Requesty API error")) // requesty
 			.mockResolvedValueOnce(mockModels) // glama
 			.mockRejectedValueOnce(new Error("Unbound API error")) // unbound
+			.mockResolvedValueOnce(mockModels) // vercel-ai-gateway
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm
 
 		await webviewMessageHandler(mockClineProvider, {
@@ -319,6 +323,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				litellm: {},
 				ollama: {},
 				lmstudio: {},
+				"vercel-ai-gateway": mockModels,
 			},
 		})
 
@@ -352,6 +357,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			.mockRejectedValueOnce(new Error("Requesty API error")) // requesty
 			.mockRejectedValueOnce(new Error("Glama API error")) // glama
 			.mockRejectedValueOnce(new Error("Unbound API error")) // unbound
+			.mockRejectedValueOnce(new Error("Vercel AI Gateway error")) // vercel-ai-gateway
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm
 
 		await webviewMessageHandler(mockClineProvider, {
@@ -533,7 +539,7 @@ describe("webviewMessageHandler - message dialog preferences", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		// Mock a current Cline instance
-		vi.mocked(mockClineProvider.getCurrentCline).mockReturnValue({
+		vi.mocked(mockClineProvider.getCurrentTask).mockReturnValue({
 			taskId: "test-task-id",
 			apiConversationHistory: [],
 			clineMessages: [],
@@ -544,7 +550,7 @@ describe("webviewMessageHandler - message dialog preferences", () => {
 
 	describe("deleteMessage", () => {
 		it("should always show dialog for delete confirmation", async () => {
-			vi.mocked(mockClineProvider.getCurrentCline).mockReturnValue({} as any) // Mock current cline exists
+			vi.mocked(mockClineProvider.getCurrentTask).mockReturnValue({} as any)
 
 			await webviewMessageHandler(mockClineProvider, {
 				type: "deleteMessage",
@@ -560,12 +566,12 @@ describe("webviewMessageHandler - message dialog preferences", () => {
 
 	describe("submitEditedMessage", () => {
 		it("should always show dialog for edit confirmation", async () => {
-			vi.mocked(mockClineProvider.getCurrentCline).mockReturnValue({} as any) // Mock current cline exists
+			vi.mocked(mockClineProvider.getCurrentTask).mockReturnValue({} as any)
 
 			await webviewMessageHandler(mockClineProvider, {
 				type: "submitEditedMessage",
-				value: 123456789, // messageTs as number
-				editedMessageContent: "edited content", // text content in editedMessageContent field
+				value: 123456789,
+				editedMessageContent: "edited content",
 			})
 
 			expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
