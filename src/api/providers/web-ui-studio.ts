@@ -741,7 +741,8 @@ function isContentString(str: string): boolean {
 	if (str.startsWith("v1:")) return false // Version tokens
 	if (str === "model") return false // Model identifier
 	if (/^\d{16,}$/.test(str)) return false // Long numeric strings (timestamps/IDs)
-	if (str.length < 10 && !str.includes(" ")) return false // Very short non-spaced strings
+	// The following line was removed as it could filter out valid short words at the beginning of a response.
+	// if (str.length < 10 && !str.includes(" ")) return false
 
 	// Allow content strings
 	return true
