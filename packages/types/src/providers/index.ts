@@ -32,3 +32,4 @@ export * from "./zai.js"
 
 export * from "./web-ui-studio.js"
 export * from "./web-ui-gemini.js"
+export * from "./deepinfra.js"

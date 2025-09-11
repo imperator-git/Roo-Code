@@ -7,7 +7,7 @@ import { TaskStatus, taskMetadataSchema } from "./task.js"
 import { globalSettingsSchema } from "./global-settings.js"
 import { providerSettingsWithIdSchema } from "./provider-settings.js"
 import { mcpMarketplaceItemSchema } from "./marketplace.js"
-import { clineMessageSchema, queuedMessageSchema } from "./message.js"
+import { clineMessageSchema, queuedMessageSchema, tokenUsageSchema } from "./message.js"
 import { staticAppPropertiesSchema, gitPropertiesSchema } from "./telemetry.js"
 
 /**
@@ -162,6 +162,7 @@ export type UserFeatures = z.infer<typeof userFeaturesSchema>
 
 export const userSettingsConfigSchema = z.object({
 	extensionBridgeEnabled: z.boolean().optional(),
+	taskSyncEnabled: z.boolean().optional(),
 })
 
 export type UserSettingsConfig = z.infer<typeof userSettingsConfigSchema>
@@ -303,6 +304,14 @@ export interface SettingsService {
 	updateUserSettings(settings: Partial<UserSettingsConfig>): Promise<boolean>
 
 	/**
+	 * Determines if task sync/recording is enabled based on organization and user settings
+	 * Organization settings take precedence over user settings.
+	 * User settings default to true if unspecified.
+	 * @returns true if task sync is enabled, false otherwise
+	 */
+	isTaskSyncEnabled(): boolean
+
+	/**
 	 * Dispose of the settings service and clean up resources
 	 */
 	dispose(): void
@@ -361,6 +370,9 @@ const extensionTaskSchema = z.object({
 	taskStatus: z.nativeEnum(TaskStatus),
 	taskAsk: clineMessageSchema.optional(),
 	queuedMessages: z.array(queuedMessageSchema).optional(),
+	parentTaskId: z.string().optional(),
+	childTaskId: z.string().optional(),
+	tokenUsage: tokenUsageSchema.optional(),
 	...taskMetadataSchema.shape,
 })
 
@@ -404,7 +416,13 @@ export enum ExtensionBridgeEventName {
 	TaskResumable = RooCodeEventName.TaskResumable,
 	TaskIdle = RooCodeEventName.TaskIdle,
 
+	TaskPaused = RooCodeEventName.TaskPaused,
+	TaskUnpaused = RooCodeEventName.TaskUnpaused,
+	TaskSpawned = RooCodeEventName.TaskSpawned,
+
 	TaskUserMessage = RooCodeEventName.TaskUserMessage,
+
+	TaskTokenUsageUpdated = RooCodeEventName.TaskTokenUsageUpdated,
 
 	ModeChanged = RooCodeEventName.ModeChanged,
 	ProviderProfileChanged = RooCodeEventName.ProviderProfileChanged,
@@ -467,7 +485,29 @@ export const extensionBridgeEventSchema = z.discriminatedUnion("type", [
 	}),
 
 	z.object({
+		type: z.literal(ExtensionBridgeEventName.TaskPaused),
+		instance: extensionInstanceSchema,
+		timestamp: z.number(),
+	}),
+	z.object({
+		type: z.literal(ExtensionBridgeEventName.TaskUnpaused),
+		instance: extensionInstanceSchema,
+		timestamp: z.number(),
+	}),
+	z.object({
+		type: z.literal(ExtensionBridgeEventName.TaskSpawned),
+		instance: extensionInstanceSchema,
+		timestamp: z.number(),
+	}),
+
+	z.object({
 		type: z.literal(ExtensionBridgeEventName.TaskUserMessage),
+		instance: extensionInstanceSchema,
+		timestamp: z.number(),
+	}),
+
+	z.object({
+		type: z.literal(ExtensionBridgeEventName.TaskTokenUsageUpdated),
 		instance: extensionInstanceSchema,
 		timestamp: z.number(),
 	}),

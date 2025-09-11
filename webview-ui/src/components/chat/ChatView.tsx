@@ -3,10 +3,10 @@ import { useDeepCompareEffect, useEvent, useMount } from "react-use"
 import debounce from "debounce"
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso"
 import removeMd from "remove-markdown"
-import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
+import { VSCodeButton, VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 import useSound from "use-sound"
 import { LRUCache } from "lru-cache"
-import { useTranslation } from "react-i18next"
+import { Trans, useTranslation } from "react-i18next"
 
 import { useDebounceEffect } from "@src/utils/useDebounceEffect"
 import { appendImages } from "@src/utils/imageUtils"
@@ -37,10 +37,10 @@ import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 import RooHero from "@src/components/welcome/RooHero"
 import RooTips from "@src/components/welcome/RooTips"
-import RooCloudCTA from "@src/components/welcome/RooCloudCTA"
 import { StandardTooltip } from "@src/components/ui"
 import { useAutoApprovalState } from "@src/hooks/useAutoApprovalState"
 import { useAutoApprovalToggles } from "@src/hooks/useAutoApprovalToggles"
+import { CloudUpsellDialog } from "@src/components/cloud/CloudUpsellDialog"
 
 import TelemetryBanner from "../common/TelemetryBanner"
 import VersionIndicator from "../common/VersionIndicator"
@@ -56,6 +56,9 @@ import SystemPromptWarning from "./SystemPromptWarning"
 import ProfileViolationWarning from "./ProfileViolationWarning"
 import { CheckpointWarning } from "./CheckpointWarning"
 import { QueuedMessages } from "./QueuedMessages"
+import DismissibleUpsell from "../common/DismissibleUpsell"
+import { useCloudUpsell } from "@src/hooks/useCloudUpsell"
+import { Cloud } from "lucide-react"
 
 export interface ChatViewProps {
 	isHidden: boolean
@@ -207,6 +210,15 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	useEffect(() => {
 		clineAskRef.current = clineAsk
 	}, [clineAsk])
+
+	const {
+		isOpen: isUpsellOpen,
+		openUpsell,
+		closeUpsell,
+		handleConnect,
+	} = useCloudUpsell({
+		autoOpenOnAuth: false,
+	})
 
 	// Keep inputValueRef in sync with inputValue state
 	useEffect(() => {
@@ -843,9 +855,39 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	useMount(() => textAreaRef.current?.focus())
 
 	const visibleMessages = useMemo(() => {
+		// Pre-compute checkpoint hashes that have associated user messages for O(1) lookup
+		const userMessageCheckpointHashes = new Set<string>()
+		modifiedMessages.forEach((msg) => {
+			if (
+				msg.say === "user_feedback" &&
+				msg.checkpoint &&
+				(msg.checkpoint as any).type === "user_message" &&
+				(msg.checkpoint as any).hash
+			) {
+				userMessageCheckpointHashes.add((msg.checkpoint as any).hash)
+			}
+		})
+
 		// Remove the 500-message limit to prevent array index shifting
 		// Virtuoso is designed to efficiently handle large lists through virtualization
-		const newVisibleMessages = modifiedMessages.filter((message: ClineMessage) => {
+		const newVisibleMessages = modifiedMessages.filter((message) => {
+			// Filter out checkpoint_saved messages that should be suppressed
+			if (message.say === "checkpoint_saved") {
+				// Check if this checkpoint has the suppressMessage flag set
+				if (
+					message.checkpoint &&
+					typeof message.checkpoint === "object" &&
+					"suppressMessage" in message.checkpoint &&
+					message.checkpoint.suppressMessage
+				) {
+					return false
+				}
+				// Also filter out checkpoint messages associated with user messages (legacy behavior)
+				if (message.text && userMessageCheckpointHashes.has(message.text)) {
+					return false
+				}
+			}
+
 			if (everVisibleMessagesTsRef.current.has(message.ts)) {
 				const alwaysHiddenOnceProcessedAsk: ClineAsk[] = [
 					"api_req_failed",
@@ -949,6 +991,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				"listCodeDefinitionNames",
 				"searchFiles",
 				"codebaseSearch",
+				"runSlashCommand",
 			].includes(tool.tool)
 		}
 
@@ -1498,7 +1541,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					onSuggestionClick={handleSuggestionClickInRow} // This was already stabilized
 					onBatchFileResponse={handleBatchFileResponse}
 					onFollowUpUnmount={handleFollowUpUnmount}
-					isFollowUpAnswered={messageOrGroup.ts === currentFollowUpTs}
+					isFollowUpAnswered={messageOrGroup.isAnswered === true || messageOrGroup.ts === currentFollowUpTs}
 					editable={
 						messageOrGroup.type === "ask" &&
 						messageOrGroup.ask === "tool" &&
@@ -1800,7 +1843,25 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 						{telemetrySetting === "unset" && <TelemetryBanner />}
 
 						<div className="mb-2.5">
-							{cloudIsAuthenticated || taskHistory.length < 4 ? <RooTips /> : <RooCloudCTA />}
+							{cloudIsAuthenticated || taskHistory.length < 4 ? (
+								<RooTips />
+							) : (
+								<>
+									<DismissibleUpsell
+										upsellId="taskList"
+										icon={<Cloud className="size-4 mt-0.5 shrink-0" />}
+										onClick={() => openUpsell()}
+										dismissOnClick={false}
+										className="bg-vscode-editor-background p-4 !text-base">
+										<Trans
+											i18nKey="cloud:upsell.taskList"
+											components={{
+												learnMoreLink: <VSCodeLink href="#" />,
+											}}
+										/>
+									</DismissibleUpsell>
+								</>
+							)}
 						</div>
 						{/* Show the task history preview if expanded and tasks exist */}
 						{taskHistory.length > 0 && isExpanded && <HistoryPreview />}
@@ -1982,6 +2043,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			)}
 
 			<div id="roo-portal" />
+			<CloudUpsellDialog open={isUpsellOpen} onOpenChange={closeUpsell} onConnect={handleConnect} />
 		</div>
 	)
 }

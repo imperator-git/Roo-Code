@@ -68,9 +68,14 @@ export type TaskProviderEvents = {
 	[RooCodeEventName.TaskInteractive]: [taskId: string]
 	[RooCodeEventName.TaskResumable]: [taskId: string]
 	[RooCodeEventName.TaskIdle]: [taskId: string]
+
+	[RooCodeEventName.TaskPaused]: [taskId: string]
+	[RooCodeEventName.TaskUnpaused]: [taskId: string]
 	[RooCodeEventName.TaskSpawned]: [taskId: string]
 
 	[RooCodeEventName.TaskUserMessage]: [taskId: string]
+
+	[RooCodeEventName.TaskTokenUsageUpdated]: [taskId: string, tokenUsage: TokenUsage]
 
 	[RooCodeEventName.ModeChanged]: [mode: string]
 	[RooCodeEventName.ProviderProfileChanged]: [config: { name: string; provider?: string }]
@@ -106,12 +111,14 @@ export type TaskMetadata = z.infer<typeof taskMetadataSchema>
 
 export interface TaskLike {
 	readonly taskId: string
-	readonly rootTask?: TaskLike
+	readonly rootTaskId?: string
+	readonly parentTaskId?: string
+	readonly childTaskId?: string
 	readonly metadata: TaskMetadata
-
 	readonly taskStatus: TaskStatus
 	readonly taskAsk: ClineMessage | undefined
 	readonly queuedMessages: QueuedMessage[]
+	readonly tokenUsage: TokenUsage | undefined
 
 	on<K extends keyof TaskEvents>(event: K, listener: (...args: TaskEvents[K]) => void | Promise<void>): this
 	off<K extends keyof TaskEvents>(event: K, listener: (...args: TaskEvents[K]) => void | Promise<void>): this
@@ -135,8 +142,8 @@ export type TaskEvents = {
 	[RooCodeEventName.TaskIdle]: [taskId: string]
 
 	// Subtask Lifecycle
-	[RooCodeEventName.TaskPaused]: []
-	[RooCodeEventName.TaskUnpaused]: []
+	[RooCodeEventName.TaskPaused]: [taskId: string]
+	[RooCodeEventName.TaskUnpaused]: [taskId: string]
 	[RooCodeEventName.TaskSpawned]: [taskId: string]
 
 	// Task Execution
