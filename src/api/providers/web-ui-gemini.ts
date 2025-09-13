@@ -39,7 +39,7 @@ This is the end of the response.
 Remember: Going forward all of the content above must be inside a single \`\`\` block.
 `
 
-const DEFAULT_MALFORMED_TOKEN_LIST = "\\>\\>\\>\\>\\>\\>\\>"
+const DEFAULT_MALFORMED_TOKEN_LIST = "\>\>\>\>\>\>\>"
 
 // UI Selectors (copied from old version)
 const PROMPT_TEXTAREA_SELECTOR = 'div.ql-editor[aria-label="Enter a prompt here"]'
@@ -179,123 +179,124 @@ export class WebUiGeminiHandler implements ApiHandler {
 				? `${systemPrompt}\n\n${getMessageContent(latestMessage)}`
 				: getMessageContent(latestMessage)
 
-		const parseFinalResponse = (text: string): string | null => {
-			const parts = text.split("\n")
-			let longestContent: string | null = null
-
-			const traverseAndFindLongest = (arr: any[]): void => {
-				for (const item of arr) {
-					if (Array.isArray(item)) {
-						traverseAndFindLongest(item)
-					} else if (typeof item === "string") {
-						if (!longestContent || item.length > longestContent.length) {
-							longestContent = item
-						}
-					}
-				}
-			}
-
-			for (let i = 0; i < parts.length; i++) {
-				try {
-					const parsed = JSON.parse(parts[i])
-					const innerJsonStr = parsed?.[0]?.[2]
-					if (typeof innerJsonStr === "string") {
-						const innerData = JSON.parse(innerJsonStr)
-						if (Array.isArray(innerData)) {
-							traverseAndFindLongest(innerData)
-						}
-					}
-				} catch {}
-			}
-			// Add decoding logic here
-			return longestContent ? xmlUnescapeConditional(longestContent) : null
-		}
-
 		let attemptCount = 0
 		const MAX_RETRY_ATTEMPTS = 3
 		let finalResponse = ""
 
 		while (attemptCount < MAX_RETRY_ATTEMPTS) {
 			attemptCount++
-			let responseTextRaw = ""
 
-			const responsePromise = new Promise<string>(async (resolve, reject) => {
-				let settled = false
-				const cleanup = () => {
-					cdp.off("Fetch.requestPaused", onPaused)
-					try {
-						cdp.send("Fetch.disable")
-					} catch {}
-					clearTimeout(timeout)
-				}
+			const responsePromise = new Promise<string>((resolve, reject) => {
+				;(async () => {
+					let settled = false
+					const responseChunks: string[] = []
+					let chunkTimeout: NodeJS.Timeout
 
-				const onPaused = async (event: any) => {
-					const { requestId, request } = event
-					logger.info(`[WebUiGeminiHandler:${this.modelName}] Request intercepted: ${request.url}`)
-					if (request.url.includes("StreamGenerate")) {
-						try {
-							const bodyData = await cdp.send("Fetch.getResponseBody", { requestId })
-							logger.info(
-								`[WebUiGeminiHandler:${this.modelName}] 1.Received response - rawdata: ${bodyData.body}`,
-							)
-							const bodyText = bodyData.base64Encoded
-								? Buffer.from(bodyData.body, "base64").toString("utf8")
-								: bodyData.body
-							const md = parseFinalResponse(bodyText)
-							logger.info(`[WebUiGeminiHandler:${this.modelName}] 2.Received response - parsed: ${md}`)
+					const processAccumulatedChunks = () => {
+						if (settled) return
+						const completeResponse = responseChunks.join("\n")
+						const parsed = parseGoogleStream(completeResponse)
 
-							if (md) {
-								if (this.malformedTokenList.some((token) => md.includes(token))) {
-									logger.info(
-										`[WebUiGeminiHandler:${this.modelName}] Response contains regeneration trigger: ${this.malformedTokenList}. Triggering regeneration.`,
-									)
-									settled = true
-									cleanup()
-									reject(new RegenerationError("Malformed token found, triggering regeneration."))
-								} else if (!settled) {
-									settled = true
-									cleanup()
-									resolve(md)
-								}
-							}
-						} catch (e: any) {
-							if (!settled) {
+						if (parsed) {
+							if (
+								this.malformedTokenList.some((token) => parsed.includes(token)) ||
+								detectUnalignedXml(parsed)
+							) {
+								logger.info(
+									`[WebUiGeminiHandler:${
+										this.modelName
+									}] Response contains malformed tokens or unaligned XML. Triggering regeneration.`,
+								)
 								settled = true
 								cleanup()
-								reject(e)
+								reject(
+									new RegenerationError(
+										"Malformed token or unaligned XML found, triggering regeneration.",
+									),
+								)
+							} else {
+								settled = true
+								cleanup()
+								resolve(parsed)
 							}
-						} finally {
+						} else {
+							// Resolve with empty string if parsing fails to produce content
+							settled = true
+							cleanup()
+							resolve("")
+						}
+					}
+
+					const cleanup = () => {
+						clearTimeout(chunkTimeout)
+						cdp.off("Fetch.requestPaused", onPaused)
+						try {
+							cdp.send("Fetch.disable")
+						} catch {}
+						clearTimeout(timeout)
+					}
+
+					const onPaused = async (event: any) => {
+						const { requestId, request } = event
+						if (request.url.includes("StreamGenerate")) {
+							try {
+								const bodyData = await cdp.send("Fetch.getResponseBody", { requestId })
+								const bodyText = bodyData.base64Encoded
+									? Buffer.from(bodyData.body, "base64").toString("utf8")
+									: bodyData.body
+
+								responseChunks.push(bodyText)
+								clearTimeout(chunkTimeout)
+								chunkTimeout = setTimeout(processAccumulatedChunks, 2000)
+							} catch (e: any) {
+								if (!settled) {
+									settled = true
+									cleanup()
+									reject(e)
+								}
+							} finally {
+								if (!page.isClosed()) {
+									try {
+										await cdp.send("Fetch.continueRequest", { requestId })
+									} catch {}
+								}
+							}
+						} else {
 							if (!page.isClosed()) {
 								try {
 									await cdp.send("Fetch.continueRequest", { requestId })
 								} catch {}
 							}
 						}
-					} else {
-						if (!page.isClosed()) {
-							try {
-								await cdp.send("Fetch.continueRequest", { requestId })
-							} catch {}
+					}
+
+					try {
+						await cdp.send("Fetch.enable", {
+							patterns: [
+								{ urlPattern: "*BardFrontendService/StreamGenerate*", requestStage: "Response" },
+							],
+						})
+						cdp.on("Fetch.requestPaused", onPaused)
+					} catch (e: any) {
+						return reject(new Error(`Fetch.enable failed: ${e.message}`))
+					}
+
+					const timeout = setTimeout(() => {
+						if (!settled) {
+							if (responseChunks.length > 0) {
+								processAccumulatedChunks()
+							} else {
+								settled = true
+								cleanup()
+								reject(
+									new Error(
+										`Timeout waiting for Gemini response (waited ${this.puppeteerTimeout} ms).`,
+									),
+								)
+							}
 						}
-					}
-				}
-
-				try {
-					await cdp.send("Fetch.enable", {
-						patterns: [{ urlPattern: "*BardFrontendService/StreamGenerate*", requestStage: "Response" }],
-					})
-					cdp.on("Fetch.requestPaused", onPaused)
-				} catch (e: any) {
-					return reject(new Error(`Fetch.enable failed: ${e.message}`))
-				}
-
-				const timeout = setTimeout(() => {
-					if (!settled) {
-						settled = true
-						cleanup()
-						reject(new Error(`Timeout waiting for Gemini response (waited ${this.puppeteerTimeout} ms).`))
-					}
-				}, this.puppeteerTimeout)
+					}, this.puppeteerTimeout)
+				})()
 			})
 
 			try {
@@ -332,8 +333,7 @@ export class WebUiGeminiHandler implements ApiHandler {
 				logger.info(`[WebUiGeminiHandler:${this.modelName}] Prompt sent. Waiting for network capture...`)
 
 				// Wait for the response promise to settle
-				responseTextRaw = await responsePromise
-				finalResponse = responseTextRaw
+				finalResponse = await responsePromise
 				break // Break the while loop if successful
 			} catch (error: any) {
 				if (error instanceof RegenerationError) {
@@ -412,20 +412,206 @@ function getMessageContent(message: Anthropic.Messages.MessageParam): string {
 	return ""
 }
 
-function xmlUnescapeConditional(str: string): string {
-	// Count number of escaped entities occurrences
-	const matches = str.match(/&(lt|gt|amp|quot|apos);/g)
+export function detectUnalignedXml(content: string): boolean {
+	const xmlTagRegex = /<([^>]+)>/g
+	const tags: string[] = []
+	let match
 
-	// Only unescape if at least two matches found
-	if (matches && matches.length >= 2) {
-		return str
-			.replace(/&lt;/g, "<")
-			.replace(/&gt;/g, ">")
-			.replace(/&amp;/g, "&")
-			.replace(/&quot;/g, '"')
-			.replace(/&apos;/g, "'")
+	while ((match = xmlTagRegex.exec(content)) !== null) {
+		const tagContent = match[1].trim()
+
+		if (tagContent.startsWith("/")) {
+			// Closing tag
+			const closingTag = tagContent.substring(1).trim().split(/\s+/)[0]
+			if (tags.length === 0) {
+				logger.warn(`Unaligned XML detected: Closing tag </${closingTag}> found with no open tags.`)
+				return true
+			}
+			const expectedTag = tags.pop()
+
+			if (expectedTag !== closingTag) {
+				logger.warn(
+					`Unaligned XML detected: Mismatched closing tag </${closingTag}>, expected </${expectedTag}>`,
+				)
+				return true // Unaligned XML detected
+			}
+		} else if (!tagContent.endsWith("/")) {
+			// Opening tag (not self-closing)
+			const tagName = tagContent.split(/\s+/)[0]
+			if (tagName.startsWith("!") || tagName.startsWith("?")) continue // ignore comments, doctypes, processing instructions
+			tags.push(tagName)
+		}
+		// Self-closing tags (<tag/>) are ignored
 	}
 
-	// Otherwise return original string unmodified
-	return str
+	// Any unclosed tags remaining indicate unaligned XML
+	if (tags.length > 0) {
+		logger.warn(`Unaligned XML detected: Unclosed tags remaining in stack: ${tags.join(", ")}`)
+		return true
+	}
+	return false
+}
+
+/**
+ * A partial type definition for the inner payload of a stream chunk.
+ * This focuses on the known paths to the desired content.
+ */
+type InnerData = any[]
+
+/**
+ * Represents the cleanly extracted content from the entire stream.
+ */
+interface FinalContent {
+	narrative: string | null
+	codeBlock: string | null
+}
+
+/**
+ * Decodes basic HTML entities found in the stream's code blocks.
+ * @param encodedString The string with HTML entities.
+ * @returns The decoded string.
+ */
+function decodeHtmlEntities(encodedString: string): string {
+	return encodedString
+		.replace(/&lt;/g, "<")
+		.replace(/&gt;/g, ">")
+		.replace(/&quot;/g, '"')
+		.replace(/&amp;/g, "&")
+}
+
+/**
+ * Intelligently finds the narrative string within a content candidate array.
+ * It searches for an element that matches the specific nested array structure
+ * of the narrative, making it robust against shifting indices.
+ * Structure sought: [[["narrative"], ...]]
+ * @param candidate The content array to search within.
+ * @returns The narrative string, or null if not found.
+ */
+function findNarrativeInCandidate(candidate: any[]): string | null {
+	if (!Array.isArray(candidate)) return null
+	for (let i = candidate.length - 1; i >= 0; i--) {
+		const element = candidate[i]
+		if (Array.isArray(element) && Array.isArray(element[0]) && typeof element[0][0] === "string") {
+			return element[0][0]
+		}
+	}
+	return null
+}
+
+/**
+ * Parses Google's unofficial streaming data protocol to extract meaningful content.
+ * This function has been battle-hardened against multiple complex stream examples.
+ */
+export function parseGoogleStream(rawData: string): string {
+	const enableLogging = true
+	const log = (message: string, ...args: any[]) => {
+		if (enableLogging) console.log(`[Parser Debug] ${message}`, ...args)
+	}
+
+	log("Starting stream parsing with new bracket-matching logic...")
+
+	const stream = rawData
+	const finalContent: FinalContent = { narrative: null, codeBlock: null }
+	let cursor = 0
+	let chunkCount = 0
+
+	while (cursor < stream.length) {
+		const firstBracket = stream.indexOf("[", cursor)
+		if (firstBracket === -1) {
+			log("No more opening brackets found. Ending parse.")
+			break
+		}
+
+		let balance = 0
+		let inString = false
+		let i = firstBracket
+		let lastValidBracket = -1
+
+		for (; i < stream.length; i++) {
+			const char = stream[i]
+			if (inString) {
+				if (char === "\\") {
+					i++ // Skip next character, it's escaped
+				} else if (char === '"') {
+					inString = false
+				}
+			} else {
+				if (char === '"') {
+					inString = true
+				} else if (char === "[") {
+					balance++
+				} else if (char === "]") {
+					balance--
+				}
+			}
+			if (balance === 0 && firstBracket !== i) {
+				lastValidBracket = i
+				break // Found a complete JSON object/array
+			}
+		}
+
+		if (lastValidBracket !== -1) {
+			chunkCount++
+			const chunkData = stream.substring(firstBracket, lastValidBracket + 1)
+			cursor = lastValidBracket + 1
+
+			log(`--- Chunk ${chunkCount}: Found potential JSON object of length ${chunkData.length} ---`)
+			log(`Raw chunk data: ${chunkData.substring(0, 200)}...`)
+
+			try {
+				const outerPayload = JSON.parse(chunkData)
+				const innerDataString = outerPayload?.[0]?.[2]
+
+				if (typeof innerDataString === "string") {
+					const innerData: InnerData = JSON.parse(innerDataString)
+					const contentCandidate = innerData?.[4]?.[0]
+
+					if (contentCandidate) {
+						const code = contentCandidate?.[1]?.[0]
+						if (typeof code === "string" && code.trim() !== "") {
+							log(`Found and updated code block (length ${code.length}).`)
+							finalContent.codeBlock = code
+						}
+
+						const narrative = findNarrativeInCandidate(contentCandidate)
+						if (typeof narrative === "string" && narrative.trim() !== "") {
+							log(`Found and updated narrative (length ${narrative.length}).`)
+							finalContent.narrative = narrative
+						}
+					}
+				} else {
+					log("Chunk did not contain the expected inner data string (outerPayload[0][2]).")
+				}
+			} catch (error: any) {
+				log(`A chunk failed to parse. This is often normal. Error: ${error.message}`)
+			}
+		} else {
+			log(`Could not find a matching closing bracket for the one at index ${firstBracket}. Ending parse.`)
+			break // No matching bracket found, end of stream
+		}
+	}
+
+	log("--- Finished Processing All Chunks ---")
+
+	if (!finalContent.narrative && !finalContent.codeBlock) {
+		log("FAIL: No meaningful content was extracted from any chunk.")
+		return "Could not extract meaningful content from the stream."
+	}
+
+	const resultParts: string[] = []
+	if (finalContent.narrative) {
+		resultParts.push(finalContent.narrative.trim())
+	}
+	if (finalContent.codeBlock) {
+		let processedCode = finalContent.codeBlock
+			.replace(/^```(\s*\w*\s*)?\n?/, "")
+			.replace(/\n?```$/, "")
+			.trim()
+		processedCode = decodeHtmlEntities(processedCode)
+		resultParts.push(processedCode)
+	}
+
+	const resultData = resultParts.join("\n\n")
+	log(`SUCCESS: Final output generated with ${resultParts.length} parts.`)
+	return resultData
 }
