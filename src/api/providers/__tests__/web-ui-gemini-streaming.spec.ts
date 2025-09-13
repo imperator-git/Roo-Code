@@ -124,6 +124,8 @@ I'm currently verifying the files within the \`sounds\` directory. Based on the 
 			})
 		})
 
+
+
 		it("should handle content without XML", () => {
 			const plainText = "This is just plain text without any XML tags"
 			expect(detectUnalignedXml(plainText)).toBe(false)
