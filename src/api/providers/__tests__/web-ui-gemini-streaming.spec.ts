@@ -17,62 +17,88 @@ describe("WebUiGeminiHandler Streaming Fix", () => {
 	})
 
 	describe("XML Validation - detectUnalignedXml", () => {
-		it("should return false for properly aligned XML", () => {
+		it("should return false for properly aligned tool XML", () => {
 			const validXml = `<update_todo_list><todos>[-] Check what's missing from the fridge</todos></update_todo_list>`
 			expect(detectUnalignedXml(validXml)).toBe(false)
 		})
 
-		it("should return false for self-closing tags", () => {
+		it("should return false for self-closing non-tool tags (ignored)", () => {
 			const selfClosingXml = `<tag/><another-tag attr="value"/>`
 			expect(detectUnalignedXml(selfClosingXml)).toBe(false)
 		})
 
-		it("should return false for tags with attributes", () => {
+		it("should return false for non-tool tags with attributes (ignored)", () => {
 			const xmlWithAttrs = `<div class="container"><span id="text">Content</span></div>`
 			expect(detectUnalignedXml(xmlWithAttrs)).toBe(false)
 		})
 
-		it("should return true for unclosed tags", () => {
+		it("should return false for unclosed non-tool tags (ignored)", () => {
 			const unclosedXml = `<div><span>Content</div>` // Missing </span>
-			expect(detectUnalignedXml(unclosedXml)).toBe(true)
-			expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("Unaligned XML detected"))
+			expect(detectUnalignedXml(unclosedXml)).toBe(false)
 		})
 
-		it("should return true for mismatched closing tags", () => {
+		it("should return false for mismatched non-tool closing tags (ignored)", () => {
 			const mismatchedXml = `<div></span>` // Wrong closing tag
-			expect(detectUnalignedXml(mismatchedXml)).toBe(true)
-			expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("Unaligned XML detected"))
+			expect(detectUnalignedXml(mismatchedXml)).toBe(false)
 		})
 
-		it("should return true for nested unclosed tags", () => {
+		it("should return false for nested unclosed non-tool tags (ignored)", () => {
 			const nestedUnclosed = `<div><span><em>Text</em></span>` // Missing </div>
-			expect(detectUnalignedXml(nestedUnclosed)).toBe(true)
+			expect(detectUnalignedXml(nestedUnclosed)).toBe(false)
 		})
 
-		it("should handle complex XML structures", () => {
-			const complexXml = `<update_todo_list>
-				<todos>
+		it("should return false for complex non-tool XML structures (ignored)", () => {
+			const complexXml = `<root>
+				<container>
 					<item status="pending">Check what's missing</item>
 					<item status="in-progress">Make shopping list</item>
-				</todos>
-			</update_todo_list>`
+				</container>
+			</root>`
 			expect(detectUnalignedXml(complexXml)).toBe(false)
 		})
 
-		it("should handle XML mixed with text content", () => {
-			const mixedContent = `Some text before <tag attr="value">content</tag> and after`
+		it("should return false for mixed content with non-tool XML (ignored)", () => {
+			const mixedContent = `Some text before <div attr="value">content</div> and after`
 			expect(detectUnalignedXml(mixedContent)).toBe(false)
 		})
 
-		it("should detect unaligned XML in sample response", () => {
+		it("should detect unaligned tool XML in sample response", () => {
 			const malformedResponse = `**Response**
 
 Some text <update_todo_list><todos>[-] Item 1</todos> and more text`
 			expect(detectUnalignedXml(malformedResponse)).toBe(true)
+			expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("Unaligned XML detected"))
 		})
 
 		it("should validate complete sample response", () => {
 			expect(detectUnalignedXml(sampleCompleteResponse)).toBe(false)
+		})
+
+		it("should detect unclosed tool tags", () => {
+			const unclosedToolXml = `<read_file><path>src/main.ts</path> and some text`
+			expect(detectUnalignedXml(unclosedToolXml)).toBe(true)
+			expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("Unaligned XML detected"))
+		})
+
+		it("should detect mismatched tool closing tags", () => {
+			const mismatchedToolXml = `<read_file></search_files>`
+			expect(detectUnalignedXml(mismatchedToolXml)).toBe(true)
+			expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("Unaligned XML detected"))
+		})
+
+		it("should handle properly nested tool tags", () => {
+			const nestedToolXml = `<update_todo_list>
+				<todos>
+					[-] First item
+					[x] Second item
+				</todos>
+			</update_todo_list>`
+			expect(detectUnalignedXml(nestedToolXml)).toBe(false)
+		})
+
+		it("should ignore self-closing tool tags", () => {
+			const selfClosingToolXml = `<execute_command command="ls -la"/><read_file path="."/>`
+			expect(detectUnalignedXml(selfClosingToolXml)).toBe(false)
 		})
 	})
 
@@ -103,13 +129,24 @@ I'm currently verifying the files within the \`sounds\` directory. Based on the 
 			expect(detectUnalignedXml(plainText)).toBe(false)
 		})
 
-		it("should handle malformed tag syntax", () => {
-			const malformed = "<unclosed <another> content"
-			expect(detectUnalignedXml(malformed)).toBe(true)
+		it("should detect unclosed tool tags", () => {
+			const unclosedTool = "<read_file> content without closing tag"
+			expect(detectUnalignedXml(unclosedTool)).toBe(true)
+			expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("Unaligned XML detected"))
 		})
 
-		it("should handle nested quotes in attributes", () => {
-			const withQuotes = `<tag attr="value with 'quotes'">content</tag>`
+		it("should handle nested quotes in tool tag attributes", () => {
+			const withQuotes = `<read_file path="file with 'quotes'.ts">content</read_file>`
+			expect(detectUnalignedXml(withQuotes)).toBe(false)
+		})
+
+		it("should ignore malformed non-tool tag syntax", () => {
+			const malformed = "<unclosed <div> content"
+			expect(detectUnalignedXml(malformed)).toBe(false)
+		})
+
+		it("should ignore nested quotes in non-tool tag attributes", () => {
+			const withQuotes = `<div attr="value with 'quotes'">content</div>`
 			expect(detectUnalignedXml(withQuotes)).toBe(false)
 		})
 	})

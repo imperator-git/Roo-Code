@@ -412,6 +412,24 @@ function getMessageContent(message: Anthropic.Messages.MessageParam): string {
 	return ""
 }
 
+const ALLOWED_XML_TAGS = new Set([
+	"read_file",
+	"fetch_instructions",
+	"search_files",
+	"list_files",
+	"list_code_definition_names",
+	"apply_diff",
+	"write_to_file",
+	"insert_content",
+	"search_and_replace",
+	"execute_command",
+	"ask_followup_question",
+	"attempt_completion",
+	"switch_mode",
+	"new_task",
+	"update_todo_list",
+])
+
 export function detectUnalignedXml(content: string): boolean {
 	const xmlTagRegex = /<([^>]+)>/g
 	const tags: string[] = []
@@ -423,6 +441,7 @@ export function detectUnalignedXml(content: string): boolean {
 		if (tagContent.startsWith("/")) {
 			// Closing tag
 			const closingTag = tagContent.substring(1).trim().split(/\s+/)[0]
+			if (!ALLOWED_XML_TAGS.has(closingTag)) continue // Skip non-tool tags
 			if (tags.length === 0) {
 				logger.warn(`Unaligned XML detected: Closing tag </${closingTag}> found with no open tags.`)
 				return true
@@ -439,6 +458,7 @@ export function detectUnalignedXml(content: string): boolean {
 			// Opening tag (not self-closing)
 			const tagName = tagContent.split(/\s+/)[0]
 			if (tagName.startsWith("!") || tagName.startsWith("?")) continue // ignore comments, doctypes, processing instructions
+			if (!ALLOWED_XML_TAGS.has(tagName)) continue // Skip non-tool tags
 			tags.push(tagName)
 		}
 		// Self-closing tags (<tag/>) are ignored
