@@ -632,6 +632,20 @@ export function parseGoogleStream(rawData: string): string {
 	}
 
 	const resultData = resultParts.join("\n\n")
+
+	const cleanupOutput = (text: string): string => {
+		return text
+			.replace(/\\</g, "<")
+			.replace(/\\>/g, ">")
+			.replace(/\\_/g, "_")
+			.replace(/```/g, "")
+			.replace(/\\u003c/g, "<")
+			.replace(/\\u003e/g, ">")
+			.trim()
+	}
+
+	const cleanedResultData = cleanupOutput(resultData)
 	log(`SUCCESS: Final output generated with ${resultParts.length} parts.`)
-	return resultData
+	log(`Final content (first 500 chars): ${cleanedResultData.substring(0, 500)}`)
+	return cleanedResultData
 }
